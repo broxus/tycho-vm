@@ -1019,7 +1019,11 @@ enum ResultCode {
 mod tests {
     use everscale_asm_macros::tvmasm;
     use everscale_types::merkle::MerkleProof;
-    use everscale_types::models::{MsgInfo, RelaxedIntMsgInfo, RelaxedMessage, StdAddr};
+    use everscale_types::models::{
+        Anycast, IntAddr, MessageLayout, MsgInfo, RelaxedIntMsgInfo, RelaxedMessage, StdAddr,
+        VarAddr,
+    };
+    use everscale_types::num::Uint9;
 
     use super::*;
     use crate::tests::{make_default_config, make_default_params};
@@ -1073,7 +1077,7 @@ mod tests {
         root
     }
 
-    pub fn make_relaxed_message(
+    fn make_relaxed_message(
         info: impl Into<RelaxedMsgInfo>,
         init: Option<StateInit>,
         body: Option<CellBuilder>,
@@ -1090,6 +1094,18 @@ mod tests {
         })
         .map(Lazy::from_raw)
         .unwrap()
+    }
+
+    fn compute_full_stats(msg: &Lazy<OwnedMessage>) -> StorageUsedShort {
+        let stats = {
+            let mut stats = ExtStorageStat::with_limits(StorageStatLimits::UNLIMITED);
+            assert!(stats.add_cell(msg.inner().as_ref()));
+            stats.stats()
+        };
+        StorageUsedShort {
+            cells: VarUint56::new(stats.cell_count),
+            bits: VarUint56::new(stats.bit_count),
+        }
     }
 
     fn original_balance(
@@ -1361,12 +1377,6 @@ mod tests {
         assert_eq!(msg_info.created_at, params.block_unixtime);
         assert_eq!(msg_info.created_lt, prev_end_lt);
 
-        let msg_size = {
-            let mut stats = ExtStorageStat::with_limits(StorageStatLimits::UNLIMITED);
-            assert!(stats.add_cell(last_msg.inner().as_ref()));
-            stats.stats()
-        };
-
         let expected_fwd_fees = Tokens::new(config.fwd_prices.lump_price as _);
         let expected_first_frac = config.fwd_prices.get_first_part(expected_fwd_fees);
 
@@ -1380,10 +1390,7 @@ mod tests {
             total_actions: 1,
             messages_created: 1,
             action_list_hash: *actions.repr_hash(),
-            total_message_size: StorageUsedShort {
-                cells: VarUint56::new(msg_size.cell_count),
-                bits: VarUint56::new(msg_size.bit_count),
-            },
+            total_message_size: compute_full_stats(last_msg),
             ..empty_action_phase()
         });
 
@@ -1456,12 +1463,6 @@ mod tests {
         assert_eq!(msg_info.created_at, params.block_unixtime);
         assert_eq!(msg_info.created_lt, prev_end_lt);
 
-        let msg_size = {
-            let mut stats = ExtStorageStat::with_limits(StorageStatLimits::UNLIMITED);
-            assert!(stats.add_cell(last_msg.inner().as_ref()));
-            stats.stats()
-        };
-
         let expected_fwd_fees = Tokens::new(config.fwd_prices.lump_price as _);
         let expected_first_frac = config.fwd_prices.get_first_part(expected_fwd_fees);
 
@@ -1478,10 +1479,7 @@ mod tests {
             total_actions: 1,
             messages_created: 1,
             action_list_hash: *actions.repr_hash(),
-            total_message_size: StorageUsedShort {
-                cells: VarUint56::new(msg_size.cell_count),
-                bits: VarUint56::new(msg_size.bit_count),
-            },
+            total_message_size: compute_full_stats(last_msg),
             ..empty_action_phase()
         });
 
@@ -1555,12 +1553,6 @@ mod tests {
         assert_eq!(msg_info.created_at, params.block_unixtime);
         assert_eq!(msg_info.created_lt, prev_end_lt);
 
-        let msg_size = {
-            let mut stats = ExtStorageStat::with_limits(StorageStatLimits::UNLIMITED);
-            assert!(stats.add_cell(last_msg.inner().as_ref()));
-            stats.stats()
-        };
-
         let expected_fwd_fees = Tokens::new(config.fwd_prices.lump_price as _);
         let expected_first_frac = config.fwd_prices.get_first_part(expected_fwd_fees);
 
@@ -1578,10 +1570,7 @@ mod tests {
             messages_created: 1,
             special_actions: 1,
             action_list_hash: *actions.repr_hash(),
-            total_message_size: StorageUsedShort {
-                cells: VarUint56::new(msg_size.cell_count),
-                bits: VarUint56::new(msg_size.bit_count),
-            },
+            total_message_size: compute_full_stats(last_msg),
             ..empty_action_phase()
         });
         assert_eq!(action_fine, Tokens::ZERO);
@@ -1664,6 +1653,244 @@ mod tests {
         );
         assert_eq!(state.total_fees, prev_total_fees);
         assert_eq!(state.balance, prev_balance);
+        Ok(())
+    }
+
+    #[test]
+    fn invalid_dst_addr() -> Result<()> {
+        let params = make_default_params();
+        let config = make_default_config();
+
+        let targets = [
+            // Unknown workchain.
+            IntAddr::Std(StdAddr::new(123, HashBytes::ZERO)),
+            // With anycast.
+            IntAddr::Std({
+                let mut addr = STUB_ADDR;
+                let mut b = CellBuilder::new();
+                b.store_u16(0xaabb)?;
+                addr.anycast = Some(Box::new(Anycast::from_slice(&b.as_data_slice())?));
+                addr
+            }),
+            // Var addr.
+            IntAddr::Var(VarAddr {
+                anycast: None,
+                address_len: Uint9::new(80),
+                workchain: 0,
+                address: vec![0; 10],
+            }),
+        ];
+
+        for dst in targets {
+            let mut state = ExecutorState::new_uninit(&params, &config, &STUB_ADDR, OK_BALANCE);
+
+            let compute_phase = stub_compute_phase(OK_GAS);
+            let prev_total_fees = state.total_fees;
+            let prev_balance = state.balance.clone();
+            let prev_end_lt = state.end_lt;
+
+            let actions = make_action_list([OutAction::SendMsg {
+                mode: SendMsgFlags::ALL_BALANCE,
+                out_msg: make_relaxed_message(
+                    RelaxedIntMsgInfo {
+                        dst,
+                        ..Default::default()
+                    },
+                    None,
+                    None,
+                ),
+            }]);
+
+            let ActionPhaseFull {
+                action_phase,
+                action_fine,
+                state_exceeds_limits,
+                bounce,
+            } = state.action_phase(ActionPhaseContext {
+                received_message: None,
+                original_balance: original_balance(&state, &compute_phase),
+                new_state: StateInit::default(),
+                actions: actions.clone(),
+                compute_phase: &compute_phase,
+            })?;
+
+            assert_eq!(action_phase, ActionPhase {
+                success: false,
+                total_actions: 1,
+                messages_created: 0,
+                result_code: ResultCode::InvalidDstAddr as _,
+                result_arg: Some(0),
+                action_list_hash: *actions.repr_hash(),
+                ..empty_action_phase()
+            });
+            assert_eq!(action_fine, Tokens::ZERO);
+            assert!(!state_exceeds_limits);
+            assert!(!bounce);
+
+            assert!(state.out_msgs.is_empty());
+            assert_eq!(state.end_lt, prev_end_lt);
+
+            assert_eq!(state.total_fees, prev_total_fees);
+            assert_eq!(state.balance, prev_balance);
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn cant_pay_fwd_fee() -> Result<()> {
+        let params = make_default_params();
+        let config = make_default_config();
+        let mut state = ExecutorState::new_uninit(&params, &config, &STUB_ADDR, Tokens::new(50000));
+
+        let compute_phase = stub_compute_phase(OK_GAS);
+        let prev_balance = state.balance.clone();
+        let prev_total_fee = state.total_fees.clone();
+        let prev_end_lt = state.end_lt;
+
+        let actions = make_action_list([OutAction::SendMsg {
+            mode: SendMsgFlags::PAY_FEE_SEPARATELY,
+            out_msg: make_relaxed_message(
+                RelaxedIntMsgInfo {
+                    value: CurrencyCollection::ZERO,
+                    dst: STUB_ADDR.into(),
+                    ..Default::default()
+                },
+                None,
+                Some({
+                    let mut b = CellBuilder::new();
+                    b.store_reference(Cell::empty_cell())?;
+                    b.store_reference(CellBuilder::build_from(0xdeafbeafu32)?)?;
+                    b
+                }),
+            ),
+        }]);
+
+        let ActionPhaseFull {
+            action_phase,
+            action_fine,
+            state_exceeds_limits,
+            bounce,
+        } = state.action_phase(ActionPhaseContext {
+            received_message: None,
+            original_balance: original_balance(&state, &compute_phase),
+            new_state: StateInit::default(),
+            actions: actions.clone(),
+            compute_phase: &compute_phase,
+        })?;
+
+        assert_eq!(action_phase, ActionPhase {
+            success: false,
+            no_funds: true,
+            result_code: ResultCode::NotEnoughBalance as _,
+            result_arg: Some(0),
+            total_actions: 1,
+            total_action_fees: Some(prev_balance.tokens),
+            action_list_hash: *actions.repr_hash(),
+            ..empty_action_phase()
+        });
+        assert_eq!(action_fine, prev_balance.tokens);
+        assert!(!state_exceeds_limits);
+        assert!(!bounce);
+
+        assert_eq!(state.balance, CurrencyCollection::ZERO);
+        assert_eq!(
+            state.total_fees,
+            prev_total_fee + action_phase.total_action_fees.unwrap_or_default()
+        );
+        assert!(state.out_msgs.is_empty());
+        assert_eq!(state.end_lt, prev_end_lt);
+        Ok(())
+    }
+
+    #[test]
+    fn rewrite_message() -> Result<()> {
+        let params = make_default_params();
+        let config = make_default_config();
+        let mut state = ExecutorState::new_uninit(&params, &config, &STUB_ADDR, OK_BALANCE);
+
+        let compute_phase = stub_compute_phase(OK_GAS);
+        let prev_balance = state.balance.clone();
+        let prev_total_fee = state.total_fees.clone();
+        let prev_end_lt = state.end_lt;
+
+        let msg_body = {
+            let mut b = CellBuilder::new();
+            b.store_zeros(600)?;
+            b.store_reference(Cell::empty_cell())?;
+            b
+        };
+
+        let actions = make_action_list([OutAction::SendMsg {
+            mode: SendMsgFlags::PAY_FEE_SEPARATELY,
+            out_msg: make_relaxed_message(
+                RelaxedIntMsgInfo {
+                    value: CurrencyCollection::ZERO,
+                    dst: STUB_ADDR.into(),
+                    ..Default::default()
+                },
+                None,
+                Some(msg_body.clone()),
+            ),
+        }]);
+
+        let ActionPhaseFull {
+            action_phase,
+            action_fine,
+            state_exceeds_limits,
+            bounce,
+        } = state.action_phase(ActionPhaseContext {
+            received_message: None,
+            original_balance: original_balance(&state, &compute_phase),
+            new_state: StateInit::default(),
+            actions: actions.clone(),
+            compute_phase: &compute_phase,
+        })?;
+
+        assert_eq!(state.out_msgs.len(), 1);
+        let last_msg = state.out_msgs.last().unwrap();
+        let msg = last_msg.load()?;
+        assert_eq!(
+            msg.layout,
+            Some(MessageLayout {
+                init_to_cell: false,
+                body_to_cell: true,
+            })
+        );
+        assert_eq!(msg.body.0, msg_body.build()?);
+
+        let MsgInfo::Int(info) = msg.info else {
+            panic!("expected an internal message");
+        };
+
+        let expected_fwd_fees = config.fwd_prices.compute_fwd_fee(CellTreeStats {
+            bit_count: 600,
+            cell_count: 2,
+        });
+        let first_frac = config.fwd_prices.get_first_part(expected_fwd_fees);
+
+        assert_eq!(action_phase, ActionPhase {
+            total_actions: 1,
+            messages_created: 1,
+            total_fwd_fees: Some(expected_fwd_fees),
+            total_action_fees: Some(first_frac),
+            action_list_hash: *actions.repr_hash(),
+            total_message_size: compute_full_stats(last_msg),
+            ..empty_action_phase()
+        });
+        assert_eq!(action_fine, Tokens::ZERO);
+        assert!(!state_exceeds_limits);
+        assert!(!bounce);
+
+        assert_eq!(state.end_lt, prev_end_lt + 1);
+        assert_eq!(
+            state.total_fees,
+            prev_total_fee + action_phase.total_action_fees.unwrap_or_default()
+        );
+        assert_eq!(state.balance.other, prev_balance.other);
+        assert_eq!(
+            state.balance.tokens,
+            prev_balance.tokens - info.value.tokens - expected_fwd_fees
+        );
         Ok(())
     }
 }
