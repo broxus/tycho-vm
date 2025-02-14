@@ -157,7 +157,8 @@ mod tests {
     use everscale_asm_macros::tvmasm;
     use everscale_types::models::{
         Account, AccountState, AccountStatusChange, CurrencyCollection, ExtInMsgInfo, IntMsgInfo,
-        Lazy, OptionalAccount, ShardAccount, StateInit, StdAddr, StorageInfo, StorageUsed,
+        Lazy, MsgInfo, OptionalAccount, ShardAccount, StateInit, StdAddr, StorageInfo, StorageUsed,
+        TxInfo,
     };
     use everscale_types::num::VarUint56;
 
@@ -337,6 +338,106 @@ mod tests {
                 ..Default::default()
             })
         );
+
+        Ok(())
+    }
+
+    #[test]
+    fn deploy_delete_in_same_tx() -> Result<()> {
+        let params = make_default_params();
+        let config = make_default_config();
+
+        let code = Boc::decode(tvmasm!(
+            r#"
+            ACCEPT
+            NEWC
+            // int_msg_info$0 ihr_disabled:Bool bounce:Bool bounced:Bool src:MsgAddress -> 011000
+            INT 0b011000 STUR 6
+            MYADDR
+            STSLICER
+            INT 0 STGRAMS
+            // extra:$0 ihr_fee:Tokens fwd_fee:Tokens created_lt:uint64 created_at:uint32
+            // 1       + 4            + 4            + 64              + 32
+            // init:none$0 body:left$0
+            // 1          + 1
+            INT 107 STZEROES
+            ENDC INT 160 SENDRAWMSG
+            "#
+        ))?;
+        let state_init = StateInit {
+            code: Some(code),
+            ..Default::default()
+        };
+
+        let address = StdAddr::new(0, *CellBuilder::build_from(&state_init)?.repr_hash());
+
+        let msg_balance = Tokens::new(1_000_000_000);
+        let msg = make_message(
+            IntMsgInfo {
+                src: address.clone().into(),
+                dst: address.clone().into(),
+                value: msg_balance.into(),
+                ..Default::default()
+            },
+            Some(state_init),
+            None,
+        );
+
+        let state = ShardAccount {
+            account: Lazy::new(&OptionalAccount::EMPTY)?,
+            last_trans_hash: HashBytes::ZERO,
+            last_trans_lt: 0,
+        };
+
+        let output = Executor::new(&params, config.as_ref())
+            .begin_ordinary(&address, false, msg, &state)?
+            .commit()?;
+
+        let new_account_state = output.new_state.load_account()?;
+        assert_eq!(new_account_state, None);
+
+        let tx = output.transaction.load()?;
+        assert_eq!(tx.orig_status, AccountStatus::NotExists);
+        assert_eq!(tx.end_status, AccountStatus::NotExists);
+
+        let TxInfo::Ordinary(info) = tx.load_info()? else {
+            panic!("expected an ordinary transaction info");
+        };
+        println!("{info:#?}");
+
+        assert!(!info.aborted);
+        assert!(info.destroyed);
+
+        let ComputePhase::Executed(compute_phase) = info.compute_phase else {
+            panic!("expected an executed compute phase");
+        };
+        assert!(compute_phase.success);
+        let action_phase = info.action_phase.unwrap();
+        assert!(action_phase.success);
+        assert_eq!(action_phase.total_actions, 1);
+        assert_eq!(action_phase.messages_created, 1);
+
+        assert_eq!(output.transaction_meta.out_msgs.len(), 1);
+        let out_msg = output.transaction_meta.out_msgs.last().unwrap().load()?;
+
+        {
+            let MsgInfo::Int(info) = out_msg.info else {
+                panic!("expected an internal outbound message");
+            };
+
+            assert_eq!(info.src, address.clone().into());
+            assert_eq!(info.dst, address.clone().into());
+            assert!(info.value.other.is_empty());
+            assert_eq!(
+                info.value.tokens,
+                msg_balance
+                    - compute_phase.gas_fees
+                    - action_phase.total_fwd_fees.unwrap_or_default()
+            );
+
+            assert_eq!(out_msg.init, None);
+            assert_eq!(out_msg.body, Default::default());
+        }
 
         Ok(())
     }
