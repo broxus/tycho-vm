@@ -1126,11 +1126,13 @@ fn exec_setcontargs_common(st: &mut VmState, copy: u32, more: i32) -> VmResult<(
 fn exec_return_args_common(st: &mut VmState, count: u32) -> VmResult<()> {
     let (copy, alt_stack) = {
         let stack = SafeRc::make_mut(&mut st.stack);
-        if stack.depth() == count as usize {
-            return Ok(());
-        }
 
-        let copy = stack.depth() - count as usize;
+        let depth = stack.depth();
+        let copy = match (count as usize).cmp(&depth) {
+            std::cmp::Ordering::Less => depth - count as usize,
+            std::cmp::Ordering::Equal => return Ok(()),
+            std::cmp::Ordering::Greater => vm_bail!(StackUnderflow(count as _)),
+        };
         let new_stack = ok!(stack.split_top(count as _));
 
         (copy, std::mem::replace(&mut st.stack, new_stack))

@@ -1,0 +1,20 @@
+[package]
+name = "tycho-vm-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2021"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+everscale-types = { workspace = true, features = ["arbitrary"] }
+libfuzzer-sys = "0.4"
+tycho-vm = { path = "../vm", features = ["arbitrary"] }
+
+[[bin]]
+name = "vm_only_code"
+path = "fuzz_targets/vm_only_code.rs"
+test = false
+doc = false
+bench = false

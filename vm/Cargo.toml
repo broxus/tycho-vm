@@ -22,6 +22,7 @@ harness = false
 [dependencies]
 ahash = { workspace = true }
 anyhow = { workspace = true }
+arbitrary = { workspace = true, features = ["derive"], optional = true }
 bitflags = { workspace = true }
 blake2 = { workspace = true }
 dyn-clone = { workspace = true }
@@ -50,3 +51,6 @@ everscale-types = { workspace = true, default-features = false, features = [
     "rand",
 ] }
 everscale-asm-macros = { workspace = true }
+
+[features]
+arbitrary = ["dep:arbitrary", "everscale-types/arbitrary", "num-bigint/arbitrary"]
