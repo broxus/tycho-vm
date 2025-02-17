@@ -23,6 +23,11 @@ fn vm_benchmark(c: &mut Criterion) {
         _ => panic!(),
     };
 
+    let addr = IntAddr::Std(
+        StdAddr::from_str("0:181317f8476706a9d931728133bbfb56ed6a18218c3f243600a00dc750f93121")
+            .unwrap(),
+    );
+
     c.bench_function("dex_pair", |b| {
         b.iter(|| {
             let smc_info = SmcInfoBase::new()
@@ -30,12 +35,7 @@ fn vm_benchmark(c: &mut Criterion) {
                 .with_block_lt(55412433000000)
                 .with_tx_lt(55412433000021)
                 .with_account_balance(CurrencyCollection::new(10000000000))
-                .with_account_addr(IntAddr::Std(
-                    StdAddr::from_str(
-                        "0:181317f8476706a9d931728133bbfb56ed6a18218c3f243600a00dc750f93121",
-                    )
-                    .unwrap(),
-                ))
+                .with_account_addr(addr.clone())
                 .with_config(config.params.clone())
                 .require_ton_v4();
 

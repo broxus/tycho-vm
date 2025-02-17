@@ -217,6 +217,11 @@ impl ExecutorState<'_> {
                 // not the case for now, but this is how the reference
                 // implementation works.
 
+                // Reset forwarding fee since no messages were actually sent.
+                // NOTE: This behaviour is not present in the reference implementation
+                //       but it seems to be more correct.
+                action_ctx.action_phase.total_fwd_fees = None;
+
                 // Compute the resulting action fine (it must not be greater than the account balance).
                 *action_ctx.action_fine = (*action_ctx.action_fine).min(self.balance.tokens);
                 let fine = *action_ctx.action_fine;
@@ -694,6 +699,9 @@ impl ExecutorState<'_> {
                 }
             },
         };
+
+        // Always normalize reserved balance.
+        reserve.other.normalize()?;
 
         // Apply "ALL_BUT" flag. Leave only "new_balance", reserve everything else.
         if mode.contains(ReserveCurrencyFlags::ALL_BUT) {

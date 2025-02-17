@@ -161,14 +161,6 @@ impl Stack {
         self.items.len()
     }
 
-    // pub fn check_underflow(&self, n: usize) -> VmResult<()> {
-    //     if n <= self.items.len() {
-    //         Ok(())
-    //     } else {
-    //         vm_bail!(StackUnderflow(n))
-    //     }
-    // }
-
     /// Reserves capacity for at least `additional` more elements to be inserted.
     pub fn reserve(&mut self, additional: usize) {
         self.items.reserve(additional);

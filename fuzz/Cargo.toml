@@ -7,14 +7,23 @@ edition = "2021"
 [package.metadata]
 cargo-fuzz = true
 
-[dependencies]
-everscale-types = { workspace = true, features = ["arbitrary"] }
-libfuzzer-sys = "0.4"
-tycho-vm = { path = "../vm", features = ["arbitrary"] }
-
 [[bin]]
 name = "vm_only_code"
 path = "fuzz_targets/vm_only_code.rs"
 test = false
 doc = false
 bench = false
+
+[[bin]]
+name = "action_phase_real"
+path = "fuzz_targets/action_phase_real.rs"
+test = false
+doc = false
+bench = false
+
+[dependencies]
+arbitrary = { workspace = true, features = ["derive"] }
+everscale-types = { workspace = true, features = ["arbitrary"] }
+libfuzzer-sys = { workspace = true }
+tycho-executor = { path = "../executor" }
+tycho-vm = { path = "../vm", features = ["arbitrary"] }

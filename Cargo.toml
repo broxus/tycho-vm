@@ -21,6 +21,7 @@ dyn-clone = "1.0"
 everscale-crypto = "0.3.0"
 everscale-types = { version = "0.1.2", default-features = false }
 hex = "0.4.3"
+libfuzzer-sys = "0.4"
 num-bigint = "0.4"
 num-integer = "0.1"
 num-traits = "0.2"
@@ -40,4 +41,4 @@ everscale-asm-macros = { git = "https://github.com/broxus/everscale-asm.git", re
 tycho-vm = { path = "./vm" }
 
 [patch.crates-io]
-everscale-types = { git = "https://github.com/broxus/everscale-types.git", rev = "ace8c504da2d566e5d6f336992960ece55735c6c" }
+everscale-types = { git = "https://github.com/broxus/everscale-types.git", rev = "29cfdafc28ff31fc0f5047bf46603d145d1ca5d9" }
