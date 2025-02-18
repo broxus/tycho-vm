@@ -66,6 +66,7 @@ pub fn make_default_params() -> ExecutorParams {
             chksig_always_succeed: true,
             ..Default::default()
         },
+        charge_action_fees_on_fail: true,
         ..Default::default()
     }
 }

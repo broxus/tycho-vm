@@ -217,10 +217,12 @@ impl ExecutorState<'_> {
                 // not the case for now, but this is how the reference
                 // implementation works.
 
-                // TODO: Charge account balance for `total_action_fees` too.
-
                 // Apply action fine to the balance.
-                action_ctx.apply_fine_on_error(&mut self.balance, &mut self.total_fees)?;
+                action_ctx.apply_fine_on_error(
+                    &mut self.balance,
+                    &mut self.total_fees,
+                    self.params.charge_action_fees_on_fail,
+                )?;
 
                 // Apply flags.
                 res.bounce |= action_ctx.need_bounce_on_fail;
@@ -228,14 +230,6 @@ impl ExecutorState<'_> {
                 // Ignore all other action.
                 return Ok(res);
             }
-        }
-
-        if !action_ctx.action_fine.is_zero() {
-            action_ctx
-                .action_phase
-                .total_action_fees
-                .get_or_insert_default()
-                .try_add_assign(*action_ctx.action_fine)?;
         }
 
         // Check that the new state does not exceed size limits.
@@ -262,10 +256,12 @@ impl ExecutorState<'_> {
             };
 
             if matches!(check, StateLimitsResult::Exceeds) {
-                // TODO: Charge account balance for `total_action_fees` too.
-
                 // Apply action fine to the balance.
-                action_ctx.apply_fine_on_error(&mut self.balance, &mut self.total_fees)?;
+                action_ctx.apply_fine_on_error(
+                    &mut self.balance,
+                    &mut self.total_fees,
+                    self.params.charge_action_fees_on_fail,
+                )?;
 
                 // Apply flags.
                 res.bounce |= action_ctx.need_bounce_on_fail;
@@ -277,6 +273,14 @@ impl ExecutorState<'_> {
             // NOTE: At this point if the state was successfully updated
             // (`check_state_limits[_diff]` returned `StateLimitsResult::Fits`)
             // cached storage stat will contain all visited cells for it.
+        }
+
+        if !action_ctx.action_fine.is_zero() {
+            action_ctx
+                .action_phase
+                .total_action_fees
+                .get_or_insert_default()
+                .try_add_assign(*action_ctx.action_fine)?;
         }
 
         action_ctx
@@ -816,10 +820,13 @@ impl ActionContext<'_> {
         &mut self,
         balance: &mut CurrencyCollection,
         total_fees: &mut Tokens,
+        charge_action_fees: bool,
     ) -> Result<(), Error> {
         // Compute the resulting action fine (it must not be greater than the account balance).
-        let action_fine = std::cmp::min(*self.action_fine, balance.tokens);
-        *self.action_fine = action_fine;
+        if charge_action_fees {
+            self.action_fine
+                .try_add_assign(self.action_phase.total_action_fees.unwrap_or_default())?;
+        }
 
         // Reset forwarding fee since no messages were actually sent.
         // NOTE: This behaviour is not present in the reference implementation
@@ -827,10 +834,10 @@ impl ActionContext<'_> {
         self.action_phase.total_fwd_fees = None;
 
         // Charge the account balance for the action fine.
-        self.action_phase.total_action_fees = Some(action_fine).filter(|t| !t.is_zero());
+        self.action_phase.total_action_fees = Some(*self.action_fine).filter(|t| !t.is_zero());
 
-        balance.tokens -= action_fine;
-        total_fees.try_add_assign(action_fine)
+        balance.tokens.try_sub_assign(*self.action_fine)?;
+        total_fees.try_add_assign(*self.action_fine)
     }
 
     fn rewrite_message_value(

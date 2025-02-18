@@ -283,6 +283,9 @@ pub struct ExecutorParams {
     ///
     /// [`Frozen`]: everscale_types::models::AccountState::Frozen
     pub disable_delete_frozen_accounts: bool,
+    /// Charge account balance for additional `total_action_fees`
+    /// when action phase fails.
+    pub charge_action_fees_on_fail: bool,
     /// Attaches an original message body as an additional cell
     /// to a bounced message body.
     pub full_body_in_bounced: bool,
