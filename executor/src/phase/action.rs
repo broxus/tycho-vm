@@ -217,19 +217,10 @@ impl ExecutorState<'_> {
                 // not the case for now, but this is how the reference
                 // implementation works.
 
-                // Reset forwarding fee since no messages were actually sent.
-                // NOTE: This behaviour is not present in the reference implementation
-                //       but it seems to be more correct.
-                action_ctx.action_phase.total_fwd_fees = None;
+                // TODO: Charge account balance for `total_action_fees` too.
 
-                // Compute the resulting action fine (it must not be greater than the account balance).
-                *action_ctx.action_fine = (*action_ctx.action_fine).min(self.balance.tokens);
-                let fine = *action_ctx.action_fine;
-
-                // Charge the account balance for the action fine.
-                action_ctx.action_phase.total_action_fees = Some(fine).filter(|t| !t.is_zero());
-                self.balance.tokens -= fine;
-                self.total_fees.try_add_assign(fine)?;
+                // Apply action fine to the balance.
+                action_ctx.apply_fine_on_error(&mut self.balance, &mut self.total_fees)?;
 
                 // Apply flags.
                 res.bounce |= action_ctx.need_bounce_on_fail;
@@ -271,6 +262,13 @@ impl ExecutorState<'_> {
             };
 
             if matches!(check, StateLimitsResult::Exceeds) {
+                // TODO: Charge account balance for `total_action_fees` too.
+
+                // Apply action fine to the balance.
+                action_ctx.apply_fine_on_error(&mut self.balance, &mut self.total_fees)?;
+
+                // Apply flags.
+                res.bounce |= action_ctx.need_bounce_on_fail;
                 res.action_phase.result_code = ResultCode::StateOutOfLimits as i32;
                 res.state_exceeds_limits = true;
                 return Ok(res);
@@ -814,6 +812,27 @@ struct ActionContext<'a> {
 }
 
 impl ActionContext<'_> {
+    fn apply_fine_on_error(
+        &mut self,
+        balance: &mut CurrencyCollection,
+        total_fees: &mut Tokens,
+    ) -> Result<(), Error> {
+        // Compute the resulting action fine (it must not be greater than the account balance).
+        let action_fine = std::cmp::min(*self.action_fine, balance.tokens);
+        *self.action_fine = action_fine;
+
+        // Reset forwarding fee since no messages were actually sent.
+        // NOTE: This behaviour is not present in the reference implementation
+        //       but it seems to be more correct.
+        self.action_phase.total_fwd_fees = None;
+
+        // Charge the account balance for the action fine.
+        self.action_phase.total_action_fees = Some(action_fine).filter(|t| !t.is_zero());
+
+        balance.tokens -= action_fine;
+        total_fees.try_add_assign(action_fine)
+    }
+
     fn rewrite_message_value(
         &mut self,
         value: &mut CurrencyCollection,
@@ -1379,9 +1398,9 @@ mod tests {
         };
         assert_eq!(msg_info.src, STUB_ADDR.into());
         assert_eq!(msg_info.dst, STUB_ADDR.into());
-        assert_eq!(msg_info.ihr_disabled, true);
-        assert_eq!(msg_info.bounce, false);
-        assert_eq!(msg_info.bounced, false);
+        assert!(msg_info.ihr_disabled);
+        assert!(!msg_info.bounce);
+        assert!(!msg_info.bounced);
         assert_eq!(msg_info.created_at, params.block_unixtime);
         assert_eq!(msg_info.created_lt, prev_end_lt);
 
@@ -1465,9 +1484,9 @@ mod tests {
         };
         assert_eq!(msg_info.src, STUB_ADDR.into());
         assert_eq!(msg_info.dst, STUB_ADDR.into());
-        assert_eq!(msg_info.ihr_disabled, true);
-        assert_eq!(msg_info.bounce, false);
-        assert_eq!(msg_info.bounced, false);
+        assert!(msg_info.ihr_disabled);
+        assert!(!msg_info.bounce);
+        assert!(!msg_info.bounced);
         assert_eq!(msg_info.created_at, params.block_unixtime);
         assert_eq!(msg_info.created_lt, prev_end_lt);
 
@@ -1555,9 +1574,9 @@ mod tests {
         };
         assert_eq!(msg_info.src, STUB_ADDR.into());
         assert_eq!(msg_info.dst, STUB_ADDR.into());
-        assert_eq!(msg_info.ihr_disabled, true);
-        assert_eq!(msg_info.bounce, false);
-        assert_eq!(msg_info.bounced, false);
+        assert!(msg_info.ihr_disabled);
+        assert!(!msg_info.bounce);
+        assert!(!msg_info.bounced);
         assert_eq!(msg_info.created_at, params.block_unixtime);
         assert_eq!(msg_info.created_lt, prev_end_lt);
 
@@ -1752,7 +1771,7 @@ mod tests {
 
         let compute_phase = stub_compute_phase(OK_GAS);
         let prev_balance = state.balance.clone();
-        let prev_total_fee = state.total_fees.clone();
+        let prev_total_fee = state.total_fees;
         let prev_end_lt = state.end_lt;
 
         let actions = make_action_list([OutAction::SendMsg {
@@ -1818,7 +1837,7 @@ mod tests {
 
         let compute_phase = stub_compute_phase(OK_GAS);
         let prev_balance = state.balance.clone();
-        let prev_total_fee = state.total_fees.clone();
+        let prev_total_fee = state.total_fees;
         let prev_end_lt = state.end_lt;
 
         let msg_body = {

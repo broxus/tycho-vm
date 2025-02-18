@@ -21,9 +21,16 @@ test = false
 doc = false
 bench = false
 
+[[bin]]
+name = "action_phase_surreal"
+path = "fuzz_targets/action_phase_surreal.rs"
+test = false
+doc = false
+bench = false
+
 [dependencies]
 arbitrary = { workspace = true, features = ["derive"] }
-everscale-types = { workspace = true, features = ["arbitrary"] }
+everscale-types = { workspace = true, features = ["arbitrary", "base64"] }
 libfuzzer-sys = { workspace = true }
 tycho-executor = { path = "../executor" }
 tycho-vm = { path = "../vm", features = ["arbitrary"] }

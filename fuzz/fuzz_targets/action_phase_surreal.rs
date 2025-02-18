@@ -1,13 +1,13 @@
 #![no_main]
 
 use arbitrary::{Arbitrary, Result, Unstructured};
-use everscale_types::arbitrary::SimpleBalance;
 use everscale_types::boc::Boc;
-use everscale_types::cell::{Cell, CellBuilder, CellFamily, HashBytes};
+use everscale_types::cell::{Cell, CellFamily, HashBytes};
+use everscale_types::dict::Dict;
 use everscale_types::models::{
-    AccountState, AccountStatus, CurrencyCollection, MsgInfo, OutAction, StdAddr,
+    AccountState, AccountStatus, CurrencyCollection, ExtraCurrencyCollection, MsgInfo, StdAddr,
 };
-use everscale_types::num::Tokens;
+use everscale_types::num::{Tokens, VarUint248};
 use libfuzzer_sys::fuzz_target;
 use tycho_executor::phase::{ActionPhaseContext, ActionPhaseFull, ReceivedMessage};
 use tycho_executor::ExecutorState;
@@ -92,7 +92,7 @@ struct Input {
     is_masterchain: bool,
     message: Option<MessageInput>,
     gas_fees: GasFees,
-    balance: SimpleBalance,
+    balance: AnyBalance,
     actions: OutActions,
 }
 
@@ -101,7 +101,7 @@ enum MessageInput {
     External,
     Internal {
         bounce_enabled: bool,
-        balance_remaining: SimpleBalance,
+        balance_remaining: AnyBalance,
     },
 }
 
@@ -144,20 +144,66 @@ impl From<OutActions> for Cell {
 
 impl<'a> Arbitrary<'a> for OutActions {
     fn arbitrary(u: &mut Unstructured<'a>) -> Result<Self> {
-        let n = u.int_in_range(0..=300u16)?;
-        let mut root = Cell::empty_cell();
-        for _ in 0..n {
-            let action = u.arbitrary::<OutAction>()?;
-            root = CellBuilder::build_from((root, action)).unwrap();
-            if root.level() != 0 {
-                return Err(arbitrary::Error::IncorrectFormat);
-            }
+        let cell = u.arbitrary::<Cell>()?;
+        if cell.level() != 0 || cell.has_max_depth() {
+            return Err(arbitrary::Error::IncorrectFormat);
         }
-        Ok(Self(root))
+        Ok(Self(cell))
     }
 
     #[inline]
     fn size_hint(_: usize) -> (usize, Option<usize>) {
         (2, None)
+    }
+}
+
+#[derive(Debug)]
+struct AnyBalance(pub CurrencyCollection);
+
+impl From<AnyBalance> for CurrencyCollection {
+    #[inline]
+    fn from(value: AnyBalance) -> Self {
+        value.0
+    }
+}
+
+impl<'a> Arbitrary<'a> for AnyBalance {
+    #[inline]
+    fn arbitrary(u: &mut Unstructured<'a>) -> Result<Self> {
+        const BIG_BALANCE: u128 = 100_000_000_000_000_000_000;
+
+        let size = u.arbitrary::<u8>()?;
+        let other = if size <= 128 {
+            Dict::new()
+        } else {
+            let mut dict = Dict::<u32, VarUint248>::new();
+            for _ in 128..size {
+                dict.set(
+                    u.arbitrary::<u32>()?,
+                    VarUint248::new(u.int_in_range(0..=BIG_BALANCE)?),
+                )
+                .unwrap();
+            }
+            dict
+        };
+
+        Ok(Self(CurrencyCollection {
+            tokens: Tokens::new(u.int_in_range(0..=BIG_BALANCE)?),
+            other: ExtraCurrencyCollection::from_raw(other.into_root()),
+        }))
+    }
+
+    #[inline]
+    fn size_hint(depth: usize) -> (usize, Option<usize>) {
+        Self::try_size_hint(depth).unwrap_or_default()
+    }
+
+    fn try_size_hint(
+        depth: usize,
+    ) -> Result<(usize, Option<usize>), arbitrary::MaxRecursionReached> {
+        Ok(arbitrary::size_hint::and(
+            <Tokens as Arbitrary>::try_size_hint(depth)?,
+            <ExtraCurrencyCollection as Arbitrary>::try_size_hint(depth)?,
+        ))
     }
 }
