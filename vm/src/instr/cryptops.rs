@@ -26,7 +26,7 @@ impl CryptOps {
             HashSource::Cell => *ok!(stack.pop_cell()).repr_hash(),
             HashSource::Slice => {
                 let cs = ok!(stack.pop_cs());
-                let cell = CellBuilder::build_from_ext(cs.apply_allow_special(), &st.gas)?;
+                let cell = CellBuilder::build_from_ext(cs.apply(), &st.gas)?;
                 *cell.repr_hash()
             }
         };
@@ -40,7 +40,7 @@ impl CryptOps {
     fn exec_compute_sha256(st: &mut VmState) -> VmResult<i32> {
         let stack = SafeRc::make_mut(&mut st.stack);
         let cs = ok!(stack.pop_cs());
-        let mut cs = cs.apply()?;
+        let mut cs = cs.apply();
         let data_bits = cs.size_bits();
         vm_ensure!(data_bits % 8 == 0, CellError(Error::CellUnderflow));
 
@@ -99,7 +99,7 @@ impl CryptOps {
         let mut data = [0; 128];
         let data_len = if from_slice {
             let cs = ok!(stack.pop_cs());
-            let mut cs = cs.apply()?;
+            let mut cs = cs.apply();
 
             let cs_bits = cs.size_bits();
             vm_ensure!(cs_bits % 8 == 0, CellError(Error::CellUnderflow));
@@ -123,7 +123,7 @@ impl CryptOps {
         };
 
         let mut signature = [0; 64];
-        signature_cs.apply()?.load_raw(&mut signature, 512)?;
+        signature_cs.apply().load_raw(&mut signature, 512)?;
 
         vm_ensure!(key_int.sign() != Sign::Minus, IntegerOutOfRange {
             min: 0,
@@ -342,7 +342,7 @@ impl<'a> HashInputReader<'a, '_> {
 
         let value = ok!(self.stack.fetch(index));
         if let Some(slice) = value.as_cell_slice() {
-            slice.apply().map_err(Into::into)
+            Ok(slice.apply())
         } else if let Some(builder) = value.as_cell_builder() {
             Ok(builder.as_data_slice())
         } else {
@@ -573,7 +573,7 @@ mod tests {
     fn build_slice<T: AsRef<[u8]>>(data: T) -> RcStackValue {
         let data = data.as_ref();
         let b = CellBuilder::from_raw_data(data, data.len() as u16 * 8).unwrap();
-        SafeRc::new_dyn_value(OwnedCellSlice::from(b.build().unwrap()))
+        SafeRc::new_dyn_value(OwnedCellSlice::new_allow_exotic(b.build().unwrap()))
     }
 
     fn build_int<T: AsRef<[u8]>>(data: T) -> RcStackValue {

@@ -1,8 +1,9 @@
 use anyhow::{Context, Result};
+use everscale_types::cell::Lazy;
 use everscale_types::dict;
 use everscale_types::error::Error;
 use everscale_types::models::{
-    AccountState, AccountStatus, CurrencyCollection, HashUpdate, IntAddr, Lazy, LibDescr, Message,
+    AccountState, AccountStatus, CurrencyCollection, HashUpdate, IntAddr, LibDescr, Message,
     OwnedMessage, ShardAccount, SimpleLib, StdAddr, StorageInfo, StorageUsed, TickTock,
     Transaction, TxInfo,
 };
@@ -375,7 +376,7 @@ impl<'a, 's> UncommitedTransaction<'a, 's> {
             Some(state) => {
                 // Load previous account storage info.
                 let prev_account_storage = 'prev: {
-                    let mut cs = self.original.account.inner().as_slice_allow_pruned();
+                    let mut cs = self.original.account.as_slice_allow_exotic();
                     if !cs.load_bit()? {
                         // account_none$0
                         break 'prev None;
@@ -433,13 +434,12 @@ impl<'a, 's> UncommitedTransaction<'a, 's> {
 
         // Serialize transaction.
         let state_update = Lazy::new(&HashUpdate {
-            old: *self.original.account.inner().repr_hash(),
+            old: *self.original.account.repr_hash(),
             new: *account_state.repr_hash(),
         })?;
         let transaction = self
             .build_transaction(end_status, state_update)
-            .and_then(CellBuilder::build_from)
-            .map(Lazy::from_raw)?;
+            .and_then(|tx| Lazy::new(&tx))?;
 
         // Collect brief transaction info.
         let transaction_meta = TransactionMeta {
@@ -451,8 +451,9 @@ impl<'a, 's> UncommitedTransaction<'a, 's> {
 
         // New shard account state.
         let new_state = ShardAccount {
-            account: Lazy::from_raw(account_state),
-            last_trans_hash: *transaction.inner().repr_hash(),
+            // SAFETY: `account_state` is an ordinary cell.
+            account: unsafe { Lazy::from_raw_unchecked(account_state) },
+            last_trans_hash: *transaction.repr_hash(),
             last_trans_lt: self.exec.start_lt,
         };
 
@@ -720,7 +721,7 @@ mod tests {
         body: Option<CellBuilder>,
     ) -> Cell {
         let body = match &body {
-            None => Cell::empty_cell_ref().as_slice_allow_pruned(),
+            None => Cell::empty_cell_ref().as_slice_allow_exotic(),
             Some(cell) => cell.as_full_slice(),
         };
         CellBuilder::build_from(Message {

@@ -27,7 +27,7 @@ impl ExecutorState<'_> {
         let mut msg_balance_remaining;
 
         // Process message header.
-        let mut slice = msg_root.as_slice_allow_pruned();
+        let mut slice = msg_root.as_slice_allow_exotic();
         match MsgInfo::load_from(&mut slice)? {
             // Handle internal message.
             MsgInfo::Int(info) => {
@@ -97,7 +97,7 @@ impl ExecutorState<'_> {
                     "state init must be an ordinary cell"
                 );
 
-                let mut slice = state_root.as_slice_allow_pruned();
+                let mut slice = state_root.as_slice_allow_exotic();
                 let parsed = StateInit::load_from(&mut slice)?;
                 anyhow::ensure!(slice.is_empty(), "state init contains extra data");
 
@@ -203,7 +203,7 @@ mod tests {
     const STUB_ADDR: StdAddr = StdAddr::new(0, HashBytes::ZERO);
 
     fn apply_cs((cell, range): &CellSliceParts) -> CellSlice<'_> {
-        range.apply_allow_special(cell)
+        range.apply_allow_exotic(cell)
     }
 
     // === Positive ===
@@ -523,7 +523,7 @@ mod tests {
                 None,
                 Some({
                     let mut b = CellBuilder::new();
-                    b.store_slice(body.as_slice_allow_pruned()).unwrap();
+                    b.store_slice(body.as_slice_allow_exotic()).unwrap();
                     b
                 }),
             ))

@@ -1269,6 +1269,8 @@ mod tests {
     use super::*;
     use crate::cont::QuitCont;
     use crate::instr::codepage0;
+    use crate::state::IntoCode;
+    use crate::OwnedCellSlice;
 
     #[test]
     #[traced_test]
@@ -1412,13 +1414,13 @@ mod tests {
             [raw cont.clone()] => [int 1, int 2],
         );
 
-        let code = Boc::decode(tvmasm! {
+        let code = make_code(tvmasm! {
             r#"
             PUSHINT 1
             PUSHINT 2
             "#
-        })?;
-        let cont = SafeRc::new_dyn_value(OrdCont::simple(code.into(), codepage0().id()));
+        });
+        let cont = SafeRc::new_dyn_value(OrdCont::simple(code, codepage0().id()));
 
         assert_run_vm!(
             "EXECUTE",
@@ -1436,15 +1438,15 @@ mod tests {
     #[test]
     #[traced_test]
     fn conditional_contops() -> anyhow::Result<()> {
-        let code = Boc::decode(tvmasm! {
+        let code = make_code(tvmasm! {
             r#"
             PUSHINT 1
             PUSHINT 2
             IFRET
             PUSHINT 0
             "#
-        })?;
-        let cont = SafeRc::new_dyn_value(OrdCont::simple(code.into(), codepage0().id()));
+        });
+        let cont = SafeRc::new_dyn_value(OrdCont::simple(code, codepage0().id()));
 
         assert_run_vm!(
             "EXECUTE",
@@ -1453,15 +1455,15 @@ mod tests {
 
         //--------
 
-        let code = Boc::decode(tvmasm! {
+        let code = make_code(tvmasm! {
             r#"
             PUSHINT 1
             PUSHINT 0
             IFRET
             PUSHINT 2
             "#
-        })?;
-        let cont = SafeRc::new_dyn_value(OrdCont::simple(code.into(), codepage0().id()));
+        });
+        let cont = SafeRc::new_dyn_value(OrdCont::simple(code, codepage0().id()));
 
         assert_run_vm!(
             "EXECUTE",
@@ -1476,15 +1478,15 @@ mod tests {
 
         //-------
 
-        let code = Boc::decode(tvmasm! {
+        let code = make_code(tvmasm! {
             r#"
             PUSHINT 2
             PUSHINT 0
             IFNOTRET
             PUSHINT 1
             "#
-        })?;
-        let cont = SafeRc::new_dyn_value(OrdCont::simple(code.into(), codepage0().id()));
+        });
+        let cont = SafeRc::new_dyn_value(OrdCont::simple(code, codepage0().id()));
 
         assert_run_vm!(
             "EXECUTE",
@@ -1493,15 +1495,15 @@ mod tests {
 
         //--------
 
-        let code = Boc::decode(tvmasm! {
+        let code = make_code(tvmasm! {
             r#"
             PUSHINT 2
             PUSHINT 1
             IFNOTRET
             PUSHINT 1
             "#
-        })?;
-        let cont = SafeRc::new_dyn_value(OrdCont::simple(code.into(), codepage0().id()));
+        });
+        let cont = SafeRc::new_dyn_value(OrdCont::simple(code, codepage0().id()));
 
         assert_run_vm!(
             "EXECUTE",
@@ -1510,13 +1512,13 @@ mod tests {
 
         //-------------
 
-        let code = Boc::decode(tvmasm! {
+        let code = make_code(tvmasm! {
             r#"
             PUSHINT 1
             PUSHINT 2
             "#
-        })?;
-        let cont = SafeRc::new_dyn_value(OrdCont::simple(code.into(), codepage0().id()));
+        });
+        let cont = SafeRc::new_dyn_value(OrdCont::simple(code, codepage0().id()));
 
         assert_run_vm!(
             "IF",
@@ -1544,21 +1546,21 @@ mod tests {
 
         //-------
 
-        let code1 = Boc::decode(tvmasm! {
+        let code1 = make_code(tvmasm! {
             r#"
             PUSHINT 1
             PUSHINT 2
             "#
-        })?;
-        let cont1 = SafeRc::new_dyn_value(OrdCont::simple(code1.into(), codepage0().id()));
+        });
+        let cont1 = SafeRc::new_dyn_value(OrdCont::simple(code1, codepage0().id()));
 
-        let code2 = Boc::decode(tvmasm! {
+        let code2 = make_code(tvmasm! {
             r#"
             PUSHINT 3
             PUSHINT 4
             "#
-        })?;
-        let cont2 = SafeRc::new_dyn_value(OrdCont::simple(code2.into(), codepage0().id()));
+        });
+        let cont2 = SafeRc::new_dyn_value(OrdCont::simple(code2, codepage0().id()));
 
         assert_run_vm!(
             "IFELSE",
@@ -1582,13 +1584,13 @@ mod tests {
     #[test]
     #[traced_test]
     fn conditional_refcontops() -> anyhow::Result<()> {
-        let code = Boc::decode(tvmasm! {
+        let code = make_code(tvmasm! {
             r#"
             PUSHINT 1
             PUSHINT 2
             "#
-        })?;
-        let cont = SafeRc::new_dyn_value(OrdCont::simple(code.into(), codepage0().id()));
+        });
+        let cont = SafeRc::new_dyn_value(OrdCont::simple(code, codepage0().id()));
 
         // assert_run_vm!(
         //     "IFREF",
@@ -1663,20 +1665,20 @@ mod tests {
     #[traced_test]
     fn loops() -> anyhow::Result<()> {
         // REPEAT
-        let code = Boc::decode(tvmasm! {
+        let code = make_code(tvmasm! {
             r#"
             PUSHINT 2
             "#
-        })?;
-        let cont = SafeRc::new_dyn_value(OrdCont::simple(code.into(), codepage0().id()));
+        });
+        let cont = SafeRc::new_dyn_value(OrdCont::simple(code, codepage0().id()));
 
-        let code1 = Boc::decode(tvmasm! {
+        let code1 = make_code(tvmasm! {
             r#"
             PUSHINT 2
             PUSHINT 1
             "#
-        })?;
-        let cont1 = SafeRc::new_dyn_value(OrdCont::simple(code1.into(), codepage0().id()));
+        });
+        let cont1 = SafeRc::new_dyn_value(OrdCont::simple(code1, codepage0().id()));
 
         assert_run_vm!(
             "REPEAT",
@@ -1715,19 +1717,19 @@ mod tests {
         );
 
         // WHILE
-        let code0 = Boc::decode(tvmasm! {
+        let code0 = make_code(tvmasm! {
             r#"
             PUSHINT 2
             "#
-        })?;
-        let c0 = SafeRc::new_dyn_value(OrdCont::simple(code0.into(), codepage0().id()));
+        });
+        let c0 = SafeRc::new_dyn_value(OrdCont::simple(code0, codepage0().id()));
 
-        let code1 = Boc::decode(tvmasm! {
+        let code1 = make_code(tvmasm! {
             r#"
             PUSHINT 0
             "#
-        })?;
-        let c1 = SafeRc::new_dyn_value(OrdCont::simple(code1.into(), codepage0().id()));
+        });
+        let c1 = SafeRc::new_dyn_value(OrdCont::simple(code1, codepage0().id()));
 
         assert_run_vm!(
             "WHILE",
@@ -1744,13 +1746,13 @@ mod tests {
         // AGAIN
         // TODO: TEST MORE CASES
 
-        let code_c0 = Boc::decode(tvmasm! {
+        let code_c0 = make_code(tvmasm! {
             r#"
             PUSHINT 2
             RETALT
             "#
-        })?;
-        let cont_c0 = SafeRc::new_dyn_value(OrdCont::simple(code_c0.into(), codepage0().id()));
+        });
+        let cont_c0 = SafeRc::new_dyn_value(OrdCont::simple(code_c0, codepage0().id()));
 
         // TODO: probably this behaviour with exit code 1 is okay. Add more cases with more loops
 
@@ -1769,7 +1771,7 @@ mod tests {
 
         // REPEATBRK
 
-        let code_c0 = Boc::decode(tvmasm! {
+        let code_c0 = make_code(tvmasm! {
             r#"
             PUSHINT 0
             DUMPSTK
@@ -1782,8 +1784,8 @@ mod tests {
             }
             IFNOT
             "#
-        })?;
-        let cont_c0 = SafeRc::new_dyn_value(OrdCont::simple(code_c0.into(), codepage0().id()));
+        });
+        let cont_c0 = SafeRc::new_dyn_value(OrdCont::simple(code_c0, codepage0().id()));
 
         assert_run_vm!(
             "REPEATBRK",
@@ -1812,7 +1814,7 @@ mod tests {
             [int 5, int 10] => [int 0]
         );
 
-        let code_c0 = Boc::decode(tvmasm! {
+        let code_c0 = make_code(tvmasm! {
             r#"
             INC
             SWAP
@@ -1825,8 +1827,8 @@ mod tests {
             SWAP
             DUMPSTK
             "#
-        })?;
-        let cont_c0 = SafeRc::new_dyn_value(OrdCont::simple(code_c0.into(), codepage0().id()));
+        });
+        let cont_c0 = SafeRc::new_dyn_value(OrdCont::simple(code_c0, codepage0().id()));
 
         assert_run_vm!(
             "UNTILBRK",
@@ -2008,5 +2010,9 @@ mod tests {
             [] => [int 999985],
             exit_code: -14,
         );
+    }
+
+    fn make_code(code: &[u8]) -> OwnedCellSlice {
+        Boc::decode(code).unwrap().into_code().unwrap()
     }
 }

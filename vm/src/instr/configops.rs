@@ -96,7 +96,7 @@ impl ConfigOps {
         } else if st.version.is_ton(6..) {
             let t2 = ok!(get_parsed_config(&st.cr));
             ok!(t2.try_get_ref::<OwnedCellSlice>(1))
-                .apply()?
+                .apply()
                 .load_u32()? as i32
         } else {
             let t1 = ok!(st.cr.get_c7_params());
@@ -131,7 +131,7 @@ impl ConfigOps {
 
         let t2 = ok!(get_parsed_config(&st.cr));
         let cs = ok!(t2.try_get_ref::<OwnedCellSlice>(if is_masterchain { 2 } else { 3 }));
-        let config = GasLimitsPrices::load_from(&mut cs.apply()?)?;
+        let config = GasLimitsPrices::load_from(&mut cs.apply())?;
 
         let price = config.compute_gas_fee(gas);
         ok!(stack.push_int(price.into_inner()));
@@ -153,7 +153,7 @@ impl ConfigOps {
             // No StoragePrices is active, so the price is 0.
             None => ok!(stack.push_zero()),
             Some(cs) => {
-                let config = StoragePrices::load_from(&mut cs.apply()?)?;
+                let config = StoragePrices::load_from(&mut cs.apply())?;
                 let fee = config.compute_storage_fee(is_masterchain, delta, CellTreeStats {
                     bit_count: bits,
                     cell_count: cells,
@@ -175,7 +175,7 @@ impl ConfigOps {
 
         let t2 = ok!(get_parsed_config(&st.cr));
         let cs = ok!(t2.try_get_ref::<OwnedCellSlice>(if is_masterchain { 4 } else { 5 }));
-        let config = MsgForwardPrices::load_from(&mut cs.apply()?)?;
+        let config = MsgForwardPrices::load_from(&mut cs.apply())?;
 
         let fee = config.compute_fwd_fee(CellTreeStats {
             bit_count: bits,
@@ -213,7 +213,7 @@ impl ConfigOps {
 
         let t2 = ok!(get_parsed_config(&st.cr));
         let cs = ok!(t2.try_get_ref::<OwnedCellSlice>(if is_masterchain { 4 } else { 5 }));
-        let config = MsgForwardPrices::load_from(&mut cs.apply()?)?;
+        let config = MsgForwardPrices::load_from(&mut cs.apply())?;
 
         {
             let t = SafeRc::make_mut(&mut fwd_fee);
@@ -238,7 +238,7 @@ impl ConfigOps {
 
         let t2 = ok!(get_parsed_config(&st.cr));
         let cs = ok!(t2.try_get_ref::<OwnedCellSlice>(if is_masterchain { 2 } else { 3 }));
-        let config = GasLimitsPrices::load_from(&mut cs.apply()?)?;
+        let config = GasLimitsPrices::load_from(&mut cs.apply())?;
 
         let fee = shift_ceil_price(gas as u128 * config.gas_price as u128);
         ok!(stack.push_int(fee));
@@ -256,7 +256,7 @@ impl ConfigOps {
 
         let t2 = ok!(get_parsed_config(&st.cr));
         let cs = ok!(t2.try_get_ref::<OwnedCellSlice>(if is_masterchain { 4 } else { 5 }));
-        let config = MsgForwardPrices::load_from(&mut cs.apply()?)?;
+        let config = MsgForwardPrices::load_from(&mut cs.apply())?;
 
         let fee = shift_ceil_price(
             (cells as u128 * config.cell_price as u128)

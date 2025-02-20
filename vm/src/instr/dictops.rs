@@ -44,7 +44,7 @@ impl DictOps {
         let stack = SafeRc::make_mut(&mut st.stack);
         let mut csr = ok!(stack.pop_cs());
         {
-            let mut cs = csr.apply()?;
+            let mut cs = csr.apply();
             if cs.load_bit()? {
                 cs.skip_first(0, 1)?;
             }
@@ -61,7 +61,7 @@ impl DictOps {
         let stack = SafeRc::make_mut(&mut st.stack);
         let mut csr = ok!(stack.pop_cs());
 
-        let mut cs = csr.apply()?;
+        let mut cs = csr.apply();
         let dict_cs = cs.load_prefix(1, cs.get_bit(0)? as u8)?;
 
         ok!(stack.push(OwnedCellSlice::from((csr.cell().clone(), dict_cs.range()))));
@@ -81,7 +81,7 @@ impl DictOps {
         let stack = SafeRc::make_mut(&mut st.stack);
         let mut csr = ok!(stack.pop_cs());
 
-        let mut cs = csr.apply()?;
+        let mut cs = csr.apply();
         let dict = match cs.get_bit(0) {
             Ok(has_root) if cs.has_remaining(1, has_root as _) => {
                 Option::<Cell>::load_from(&mut cs)?
@@ -130,7 +130,7 @@ impl DictOps {
             cb.as_data_slice()
         } else {
             cs = stack.pop_cs()?;
-            cs.apply()?.load_prefix(n, 0)?
+            cs.apply().load_prefix(n, 0)?
         };
 
         let value = if s.is_ref() {
@@ -195,7 +195,7 @@ impl DictOps {
             cb.as_data_slice()
         } else {
             cs = stack.pop_cs()?;
-            cs.apply()?.load_prefix(n, 0)?
+            cs.apply().load_prefix(n, 0)?
         };
 
         let value = ok!(stack.pop());
@@ -206,7 +206,7 @@ impl DictOps {
         } else if s.is_ref() {
             ok!(value.try_as_cell()) as &dyn Store
         } else {
-            value_cs = ok!(value.try_as_cell_slice()).apply()?;
+            value_cs = ok!(value.try_as_cell_slice()).apply();
             &value_cs as &dyn Store
         };
 
@@ -267,7 +267,7 @@ impl DictOps {
             cb.as_data_slice()
         } else {
             cs = stack.pop_cs()?;
-            cs.apply()?.load_prefix(n, 0)?
+            cs.apply().load_prefix(n, 0)?
         };
 
         let ok_f = !matches!(mode, SetMode::Add);
@@ -280,7 +280,7 @@ impl DictOps {
         } else if s.is_ref() {
             ok!(value.try_as_cell()) as &dyn Store
         } else {
-            value_cs = ok!(value.try_as_cell_slice()).apply()?;
+            value_cs = ok!(value.try_as_cell_slice()).apply();
             &value_cs as &dyn Store
         };
 
@@ -324,7 +324,7 @@ impl DictOps {
             cb.as_data_slice()
         } else {
             cs = stack.pop_cs()?;
-            cs.apply()?.load_prefix(n, 0)?
+            cs.apply().load_prefix(n, 0)?
         };
 
         let mut dict = dict.as_deref().cloned();
@@ -357,7 +357,7 @@ impl DictOps {
             cb.as_data_slice()
         } else {
             cs = stack.pop_cs()?;
-            cs.apply()?.load_prefix(n, 0)?
+            cs.apply().load_prefix(n, 0)?
         };
 
         let mut dict = dict.as_deref().cloned();
@@ -399,7 +399,7 @@ impl DictOps {
             cb.as_data_slice()
         } else {
             cs = stack.pop_cs()?;
-            cs.apply()?.load_prefix(n, 0)?
+            cs.apply().load_prefix(n, 0)?
         };
 
         let value = dict::dict_get(dict.as_deref(), n, key, &st.gas)?;
@@ -423,7 +423,7 @@ impl DictOps {
             cb.as_data_slice()
         } else {
             cs = stack.pop_cs()?;
-            cs.apply()?.load_prefix(n, 0)?
+            cs.apply().load_prefix(n, 0)?
         };
 
         let value = ok!(stack.pop_cell_opt());
@@ -492,7 +492,7 @@ impl DictOps {
             ok!(stack.push(load_int_from_slice(&mut key.as_data_slice(), n, signed)?));
         } else {
             let cs = ok!(stack.pop_cs());
-            let key = cs.apply()?.load_prefix(n, 0)?;
+            let key = cs.apply().load_prefix(n, 0)?;
 
             let Some((key, value)) =
                 dict::dict_find_owned(dict.as_deref(), n, key, dir, s.is_eq(), false, ctx)?
@@ -502,7 +502,7 @@ impl DictOps {
             };
 
             ok!(stack.push(OwnedCellSlice::from(value)));
-            ok!(stack.push(OwnedCellSlice::from(key.build_ext(ctx)?)));
+            ok!(stack.push(OwnedCellSlice::new_allow_exotic(key.build_ext(ctx)?)));
         }
 
         ok!(stack.push_bool(true));
@@ -565,7 +565,7 @@ impl DictOps {
         if s.is_int() {
             ok!(stack.push(load_int_from_slice(&mut key.as_data_slice(), n, signed)?));
         } else {
-            ok!(stack.push(OwnedCellSlice::from(key.build_ext(ctx)?)));
+            ok!(stack.push(OwnedCellSlice::new_allow_exotic(key.build_ext(ctx)?)));
         }
         ok!(stack.push_bool(true));
         Ok(0)
@@ -614,7 +614,7 @@ impl DictOps {
         debug_assert!(ok);
 
         let stack = SafeRc::make_mut(&mut st.stack);
-        let mut code = st.code.apply()?;
+        let mut code = st.code.apply();
 
         let slice = code.load_prefix(1, 1)?;
         let slice_range = slice.range();
@@ -897,7 +897,7 @@ impl std::fmt::Display for DictExecArgs {
 fn extract_value_ref(value: CellSliceParts, is_ref: bool) -> VmResult<RcStackValue> {
     let value = OwnedCellSlice::from(value);
     if is_ref {
-        to_value_ref(value.apply()?)
+        to_value_ref(value.apply())
     } else {
         Ok(SafeRc::new_dyn_value(value))
     }
@@ -911,7 +911,7 @@ fn to_value_ref(mut cs: CellSlice<'_>) -> VmResult<RcStackValue> {
 
 #[cfg(test)]
 pub mod tests {
-    use everscale_types::models::Lazy;
+    use everscale_types::cell::Lazy;
     use num_bigint::BigInt;
     use tracing_test::traced_test;
 
@@ -1353,7 +1353,7 @@ pub mod tests {
         let value = BigInt::from(value);
         let mut builder = CellBuilder::new();
         store_int_to_builder(&value, 32, true, &mut builder).unwrap();
-        SafeRc::new_dyn_value(OwnedCellSlice::from(builder.build().unwrap()))
+        SafeRc::new_dyn_value(OwnedCellSlice::new_allow_exotic(builder.build().unwrap()))
     }
 
     fn new_cell(value: i32) -> RcStackValue {

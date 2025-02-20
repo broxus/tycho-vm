@@ -41,7 +41,7 @@ impl ArithOps {
         );
         st.code.range_mut().skip_first(bits, 0).ok();
 
-        let mut cs = st.code.apply()?;
+        let mut cs = st.code.apply();
         let int = load_int_from_slice(&mut cs, value_len, true)?;
         st.code.set_range(cs.range());
 

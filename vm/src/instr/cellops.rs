@@ -123,7 +123,7 @@ impl CellOps {
             SliceBoolUnaryOp::NoBits => range.is_data_empty(),
             SliceBoolUnaryOp::NoRefs => range.is_refs_empty(),
             SliceBoolUnaryOp::FirstBit => {
-                let slice = cs.apply_allow_special();
+                let slice = cs.apply();
                 slice.get_bit(0).unwrap_or_default()
             }
         };
@@ -137,8 +137,8 @@ impl CellOps {
         let cs2 = ok!(stack.pop_cs());
         let cs1 = ok!(stack.pop_cs());
 
-        let slice1 = cs1.apply_allow_special();
-        let slice2 = cs2.apply_allow_special();
+        let slice1 = cs1.apply();
+        let slice2 = cs2.apply();
 
         let res = slice1.lex_cmp(&slice2)? as i8;
         ok!(stack.push_int(res));
@@ -163,8 +163,8 @@ impl CellOps {
         let cs2 = ok!(stack.pop_cs());
         let cs1 = ok!(stack.pop_cs());
 
-        let slice1 = cs1.apply_allow_special();
-        let slice2 = cs2.apply_allow_special();
+        let slice1 = cs1.apply();
+        let slice2 = cs2.apply();
 
         let res = match op {
             SliceBinaryOp::DataEq => slice1.lex_cmp(&slice2)?.is_eq(),
@@ -196,7 +196,7 @@ impl CellOps {
     fn exec_slice_int_unary_op(st: &mut VmState, op: SliceIntUnaryOp) -> VmResult<i32> {
         let stack = SafeRc::make_mut(&mut st.stack);
         let cs = ok!(stack.pop_cs());
-        let slice = cs.apply_allow_special();
+        let slice = cs.apply();
         let res = match op {
             SliceIntUnaryOp::Leading0 => slice.count_leading(false),
             SliceIntUnaryOp::Leading1 => slice.count_leading(true),
@@ -284,8 +284,7 @@ impl CellOps {
             return finish_store_overflow(stack, cs, builder, quiet);
         }
 
-        // TODO: Is it ok to store special cells data as is?
-        let slice = cs.apply_allow_special();
+        let slice = cs.apply();
         SafeRc::make_mut(&mut builder).store_slice(slice)?;
 
         finish_store_ok(stack, builder, quiet)
@@ -367,8 +366,7 @@ impl CellOps {
             return finish_store_overflow(stack, builder, cs, quiet);
         }
 
-        // TODO: Is it ok to store special cells data as is?
-        let slice = cs.apply_allow_special();
+        let slice = cs.apply();
         SafeRc::make_mut(&mut builder).store_slice(slice)?;
 
         finish_store_ok(stack, builder, quiet)
@@ -408,7 +406,7 @@ impl CellOps {
 
         {
             let builder = SafeRc::make_mut(&mut builder);
-            let mut code = st.code.apply()?;
+            let mut code = st.code.apply();
             for _ in 0..refs {
                 let cell = code.load_reference_cloned()?;
                 builder.store_reference(cell)?;
@@ -659,10 +657,9 @@ impl CellOps {
         let stack = SafeRc::make_mut(&mut st.stack);
         let cell = ok!(stack.pop_cell());
 
-        let cell = st
+        let cs = st
             .gas
-            .load_cell(SafeRc::unwrap_or_clone(cell), LoadMode::Full)?;
-        let cs = OwnedCellSlice::new(cell);
+            .load_cell_as_slice(SafeRc::unwrap_or_clone(cell), LoadMode::Full)?;
 
         ok!(stack.push(cs));
         Ok(0)
@@ -692,7 +689,7 @@ impl CellOps {
         let mut cs = ok!(stack.pop_cs());
         vm_ensure!(cs.range().size_refs() > 0, CellError(Error::CellUnderflow));
 
-        let mut slice = cs.apply_allow_special();
+        let mut slice = cs.apply();
         let cell = slice.load_reference_cloned()?;
         ok!(stack.push(cell));
 
@@ -708,14 +705,14 @@ impl CellOps {
         let mut cs = ok!(stack.pop_cs());
         vm_ensure!(cs.range().size_refs() > 0, CellError(Error::CellUnderflow));
 
-        let mut slice = cs.apply_allow_special();
+        let mut slice = cs.apply();
         let cell = slice.load_reference_cloned()?;
-        let cell = st.gas.load_cell(cell, LoadMode::Full)?;
+        let child_cs = st.gas.load_cell_as_slice(cell, LoadMode::Full)?;
 
         let range = slice.range();
         SafeRc::make_mut(&mut cs).set_range(range);
         ok!(stack.push_raw(cs));
-        ok!(stack.push(OwnedCellSlice::new(cell)));
+        ok!(stack.push(child_cs));
         Ok(0)
     }
 
@@ -747,7 +744,7 @@ impl CellOps {
         let mut cs = ok!(stack.pop_cs());
 
         let (int, range) = {
-            let mut slice = cs.apply_allow_special();
+            let mut slice = cs.apply();
 
             let ld_bits = std::cmp::min(slice.size_bits(), x as _);
             let int = match x {
@@ -870,7 +867,7 @@ impl CellOps {
     fn exec_slice_begins_with(st: &mut VmState, quiet: bool) -> VmResult<i32> {
         let stack = SafeRc::make_mut(&mut st.stack);
         let target = ok!(stack.pop_cs());
-        let target = target.apply_allow_special();
+        let target = target.apply();
         exec_slice_begins_with_common(stack, &target, quiet)
     }
 
@@ -997,10 +994,10 @@ impl CellOps {
         let is_special = cell.descriptor().is_exotic();
 
         // NOTE: Do not resolve cell here since we want to return an original.
-        let cell = st
+        let cs = st
             .gas
-            .load_cell(SafeRc::unwrap_or_clone(cell), LoadMode::UseGas)?;
-        let cs = OwnedCellSlice::new(cell);
+            .load_cell_as_slice(SafeRc::unwrap_or_clone(cell), LoadMode::UseGas)?;
+
         ok!(stack.push(cs));
         ok!(stack.push_bool(is_special));
         Ok(0)
@@ -1047,7 +1044,7 @@ impl CellOps {
 
             // Find library by hash.
             let mut library_hash = HashBytes::ZERO;
-            cell.as_slice_allow_pruned()
+            cell.as_slice_allow_exotic()
                 .get_raw(8, &mut library_hash.0, 256)?;
 
             match st.gas.libraries().find(&library_hash) {
@@ -1102,7 +1099,7 @@ impl CellOps {
         let idx = ok!(stack.pop_smallint_range(0, 3)) as u8;
         let cs = ok!(stack.pop_cs());
 
-        let slice = cs.apply_allow_special();
+        let slice = cs.apply();
         let cell = slice.get_reference_cloned(idx)?;
         ok!(stack.push(cell));
         Ok(0)
@@ -1130,7 +1127,7 @@ impl CellOps {
         let stack = SafeRc::make_mut(&mut st.stack);
         let cs = ok!(stack.pop_cs());
 
-        let slice = cs.apply_allow_special();
+        let slice = cs.apply();
         let cell = slice.get_reference_cloned(x as _)?;
         ok!(stack.push(cell));
         Ok(0)
@@ -1156,7 +1153,7 @@ impl CellOps {
         }
 
         let range = {
-            let mut slice = cs.apply_allow_special();
+            let mut slice = cs.apply();
 
             let int = match (s.is_unsigned(), s.is_long()) {
                 (false, false) => BigInt::from(slice.load_u32()?.swap_bytes() as i32),
@@ -1196,9 +1193,9 @@ impl CellOps {
                 false => Cell::all_zeros_ref(),
                 true => Cell::all_ones_ref(),
             };
-            let target = target.as_slice_allow_pruned();
+            let target = target.as_slice_allow_exotic();
 
-            let mut slice = cs.apply_allow_special();
+            let mut slice = cs.apply();
             let prefix = slice.longest_common_data_prefix(&target);
             let ok = slice.skip_first(prefix.size_bits(), 0).is_ok();
             debug_assert!(ok);
@@ -1217,7 +1214,7 @@ impl CellOps {
     fn exec_slice_depth(st: &mut VmState) -> VmResult<i32> {
         let stack = SafeRc::make_mut(&mut st.stack);
         let cs = ok!(stack.pop_cs());
-        let slice = cs.apply_allow_special();
+        let slice = cs.apply();
 
         let depth = compute_depth(slice.references());
         ok!(stack.push_int(depth));
@@ -1309,12 +1306,12 @@ fn exec_push_ref_common(
     ok!(match mode {
         PushRefMode::Cell => stack.push(cell),
         PushRefMode::Slice => {
-            let cell = st.gas.load_cell(cell, LoadMode::Full)?;
-            stack.push(OwnedCellSlice::new(cell))
+            let cs = st.gas.load_cell_as_slice(cell, LoadMode::Full)?;
+            stack.push(cs)
         }
         PushRefMode::Cont => {
-            let code = st.gas.load_cell(cell, LoadMode::Full)?;
-            let cont = SafeRc::new(OrdCont::simple(code.into(), st.cp.id()));
+            let code = st.gas.load_cell_as_slice(cell, LoadMode::Full)?;
+            let cont = SafeRc::new(OrdCont::simple(code, st.cp.id()));
             stack.push_raw(cont)
         }
     });
@@ -1603,7 +1600,7 @@ fn exec_load_int_common(stack: &mut Stack, bits: u16, args: LoadIntArgs) -> VmRe
     }
 
     let range = {
-        let mut slice = cs.apply_allow_special();
+        let mut slice = cs.apply();
         let int = load_int_from_slice(&mut slice, bits, args.is_signed())?;
 
         ok!(stack.push_int(int));
@@ -1794,7 +1791,7 @@ fn exec_slice_begins_with_common(
     let mut cs = ok!(stack.pop_cs());
 
     let range = {
-        let slice = cs.apply_allow_special();
+        let slice = cs.apply();
         let Some(slice) = slice.strip_data_prefix(prefix) else {
             if !quiet {
                 vm_bail!(CellError(Error::CellUnderflow));
@@ -2003,7 +2000,7 @@ mod tests {
         cb.store_u8(0).unwrap();
 
         let cell = cb.build().unwrap();
-        let slice = OwnedCellSlice::from(cell.clone());
+        let slice = OwnedCellSlice::new_allow_exotic(cell.clone());
         assert_run_vm!("CTOS", [cell cell] => [slice slice])
     }
 
@@ -2011,7 +2008,7 @@ mod tests {
     #[traced_test]
     fn ends_tests() {
         let cell = Cell::default();
-        let slice = OwnedCellSlice::from(cell.clone());
+        let slice = OwnedCellSlice::new_allow_exotic(cell.clone());
 
         assert_run_vm!("ENDS", [slice slice.clone()] => []);
         assert_run_vm!("ENDS", [int 1, slice slice] => [int 1]);
@@ -2019,7 +2016,7 @@ mod tests {
         let mut cb = CellBuilder::new();
         cb.store_u8(1).unwrap();
         let cell = cb.build().unwrap();
-        let sc = OwnedCellSlice::from(cell);
+        let sc = OwnedCellSlice::new_allow_exotic(cell);
 
         assert_run_vm!("ENDS", [slice sc] => [int 0], exit_code: 9)
     }
@@ -2066,18 +2063,18 @@ mod tests {
         let cell = make_cell_with_reference();
         let reference = cell.reference_cloned(0).unwrap();
 
-        let mut slice = OwnedCellSlice::from(cell.clone());
+        let mut slice = OwnedCellSlice::new_allow_exotic(cell.clone());
         let initial_rc_slice = slice.clone();
 
-        let mut cs = slice.apply().unwrap();
+        let mut cs = slice.apply();
         cs.skip_first(0, 1).unwrap();
         slice.set_range(cs.range());
 
         assert_run_vm!("LDREF", [slice initial_rc_slice.clone()] => [cell reference.clone(), slice slice]);
 
-        let slice = OwnedCellSlice::from(cell.clone());
+        let slice = OwnedCellSlice::new_allow_exotic(cell.clone());
         let mut initial_rc_slice = slice.clone();
-        let mut cs = initial_rc_slice.apply().unwrap();
+        let mut cs = initial_rc_slice.apply();
         cs.skip_first(0, 1).unwrap();
         initial_rc_slice.set_range(cs.range());
 
@@ -2090,11 +2087,11 @@ mod tests {
         let cell = make_cell_with_reference();
         let reference = cell.reference_cloned(0).unwrap();
 
-        let initial_cell = OwnedCellSlice::from(cell.clone());
-        let result_slice = OwnedCellSlice::from(reference.clone());
+        let initial_cell = OwnedCellSlice::new_allow_exotic(cell.clone());
+        let result_slice = OwnedCellSlice::new_allow_exotic(reference.clone());
 
-        let mut slice = OwnedCellSlice::from(cell.clone());
-        let mut cs = slice.apply().unwrap();
+        let mut slice = OwnedCellSlice::new_allow_exotic(cell.clone());
+        let mut cs = slice.apply();
         cs.skip_first(0, 1).unwrap();
         slice.set_range(cs.range());
 
@@ -2395,7 +2392,7 @@ mod tests {
     #[traced_test]
     fn info_tests() {
         let slice = make_cell_slice_with_refs(1000, 512, 2);
-        let cs = slice.apply().unwrap();
+        let cs = slice.apply();
         let cell = cs.get_reference_cloned(0).unwrap();
         assert_run_vm!("PLDREFVAR", [slice slice.clone(), int 0] => [cell cell.clone()]);
         assert_run_vm!("PLDREF", [slice slice.clone()] => [cell cell.clone()]);
@@ -2478,8 +2475,8 @@ mod tests {
     fn load_exotic_cells() -> anyhow::Result<()> {
         // Ordinary
         let cell = Cell::default();
-        assert_run_vm!("CTOS", [cell cell.clone()] => [slice cell.clone()]);
-        assert_run_vm!("XCTOS", [cell cell.clone()] => [slice cell.clone(), int 0]);
+        assert_run_vm!("CTOS", [cell cell.clone()] => [slice OwnedCellSlice::new_allow_exotic(cell.clone())]);
+        assert_run_vm!("XCTOS", [cell cell.clone()] => [slice OwnedCellSlice::new_allow_exotic(cell.clone()), int 0]);
         assert_run_vm!("XLOAD", [cell cell.clone()] => [cell cell.clone()]);
         assert_run_vm!("XLOADQ", [cell cell.clone()] => [cell cell.clone(), int -1]);
 
@@ -2490,21 +2487,21 @@ mod tests {
             Cell::empty_context(),
         )?;
         assert_run_vm!("CTOS", [cell pruned_branch.clone()] => [int 0], exit_code: 9);
-        assert_run_vm!("XCTOS", [cell pruned_branch.clone()] => [slice pruned_branch.clone(), int -1]);
+        assert_run_vm!("XCTOS", [cell pruned_branch.clone()] => [slice OwnedCellSlice::new_allow_exotic(pruned_branch.clone()), int -1]);
         assert_run_vm!("XLOAD", [cell pruned_branch.clone()] => [int 0], exit_code: 9);
         assert_run_vm!("XLOADQ", [cell pruned_branch.clone()] => [int 0]);
 
         // Merkle proof
         let merkle_proof = CellBuilder::build_from(MerkleProof::default())?;
         assert_run_vm!("CTOS", [cell merkle_proof.clone()] => [int 0], exit_code: 9);
-        assert_run_vm!("XCTOS", [cell merkle_proof.clone()] => [slice merkle_proof.clone(), int -1]);
+        assert_run_vm!("XCTOS", [cell merkle_proof.clone()] => [slice OwnedCellSlice::new_allow_exotic(merkle_proof.clone()), int -1]);
         assert_run_vm!("XLOAD", [cell merkle_proof.clone()] => [int 0], exit_code: 9);
         assert_run_vm!("XLOADQ", [cell merkle_proof.clone()] => [int 0]);
 
         // Merkle update
         let merkle_update = CellBuilder::build_from(MerkleUpdate::default())?;
         assert_run_vm!("CTOS", [cell merkle_update.clone()] => [int 0], exit_code: 9);
-        assert_run_vm!("XCTOS", [cell merkle_update.clone()] => [slice merkle_update.clone(), int -1]);
+        assert_run_vm!("XCTOS", [cell merkle_update.clone()] => [slice OwnedCellSlice::new_allow_exotic(merkle_update.clone()), int -1]);
         assert_run_vm!("XLOAD", [cell merkle_update.clone()] => [int 0], exit_code: 9);
         assert_run_vm!("XLOADQ", [cell merkle_update.clone()] => [int 0]);
 
@@ -2520,7 +2517,7 @@ mod tests {
 
         // - unregistered
         assert_run_vm!("CTOS", [cell library.clone()] => [int 0], exit_code: 9);
-        assert_run_vm!("XCTOS", [cell library.clone()] => [slice library.clone(), int -1]);
+        assert_run_vm!("XCTOS", [cell library.clone()] => [slice OwnedCellSlice::new_allow_exotic(library.clone()), int -1]);
         assert_run_vm!("XLOAD", [cell library.clone()] => [int 0], exit_code: 9);
         assert_run_vm!("XLOADQ", [cell library.clone()] => [int 0]);
 
@@ -2530,8 +2527,8 @@ mod tests {
             root: library_code.clone(),
         })]);
 
-        assert_run_vm!("CTOS", libs: libs.clone(), [cell library.clone()] => [slice library_code.clone()]);
-        assert_run_vm!("XCTOS", libs: libs.clone(), [cell library.clone()] => [slice library.clone(), int -1]);
+        assert_run_vm!("CTOS", libs: libs.clone(), [cell library.clone()] => [slice OwnedCellSlice::new_allow_exotic(library_code.clone())]);
+        assert_run_vm!("XCTOS", libs: libs.clone(), [cell library.clone()] => [slice OwnedCellSlice::new_allow_exotic(library.clone()), int -1]);
         assert_run_vm!("XLOAD", libs: libs.clone(), [cell library.clone()] => [cell library_code.clone()]);
         assert_run_vm!("XLOADQ", libs: libs.clone(), [cell library.clone()] => [cell library_code.clone(), int -1]);
 
@@ -2549,8 +2546,8 @@ mod tests {
     }
 
     fn get_common_prefix(slice: &OwnedCellSlice, prefix: &OwnedCellSlice) -> OwnedCellSlice {
-        let cs = slice.apply().unwrap();
-        let prefix = prefix.apply().unwrap();
+        let cs = slice.apply();
+        let prefix = prefix.apply();
         let common = cs.longest_common_data_prefix(&prefix);
         let mut slice = slice.clone();
         slice.set_range(common.range());
@@ -2583,24 +2580,25 @@ mod tests {
             cb.store_reference(cell).unwrap()
         }
         let cell = cb.build().unwrap();
-        OwnedCellSlice::from(cell)
+        OwnedCellSlice::new_allow_exotic(cell)
     }
+
     fn make_uint_cell_slice(value: u128, bits: u16) -> OwnedCellSlice {
         let mut cb = CellBuilder::new();
         store_int_to_builder(&BigInt::from(value), bits, false, &mut cb).unwrap();
         let cell = cb.build().unwrap();
-        OwnedCellSlice::from(cell)
+        OwnedCellSlice::new_allow_exotic(cell)
     }
 
     fn make_int_cell_slice(value: i128, bits: u16) -> OwnedCellSlice {
         let mut cb = CellBuilder::new();
         store_int_to_builder(&BigInt::from(value), bits, true, &mut cb).unwrap();
         let cell = cb.build().unwrap();
-        OwnedCellSlice::from(cell)
+        OwnedCellSlice::new_allow_exotic(cell)
     }
 
     fn cut_slice(slice: &OwnedCellSlice, bits: u16) -> (OwnedCellSlice, OwnedCellSlice) {
-        let mut cs = slice.apply().unwrap();
+        let mut cs = slice.apply();
         let prefix = cs.load_prefix(bits, 0).unwrap();
         let mut left = slice.clone();
         let mut right = slice.clone();
@@ -2611,7 +2609,7 @@ mod tests {
     }
 
     fn cut_slice_prefix(slice: &OwnedCellSlice, bits: u16, refs: u8) -> OwnedCellSlice {
-        let mut cs = slice.apply().unwrap();
+        let mut cs = slice.apply();
         let prefix = cs.load_prefix(bits, refs).unwrap();
         let mut slice = slice.clone();
         slice.set_range(prefix.range());
@@ -2619,7 +2617,7 @@ mod tests {
     }
 
     fn cut_slice_suffix(slice: &OwnedCellSlice, bits: u16, refs: u8) -> OwnedCellSlice {
-        let mut cs = slice.apply().unwrap();
+        let mut cs = slice.apply();
         let suffix = cs.load_suffix(bits, refs).unwrap();
         let mut slice = slice.clone();
         slice.set_range(suffix.range());
@@ -2627,7 +2625,7 @@ mod tests {
     }
 
     fn cut_slice_to_uint(slice: &OwnedCellSlice, bits: u16) -> (BigInt, OwnedCellSlice) {
-        let mut cs = slice.apply().unwrap();
+        let mut cs = slice.apply();
         let prefix = load_int_from_slice(&mut cs, bits, false).unwrap();
 
         let mut right = slice.clone();
@@ -2636,7 +2634,7 @@ mod tests {
     }
 
     fn cut_slice_to_int(slice: &OwnedCellSlice, bits: u16) -> (BigInt, OwnedCellSlice) {
-        let mut cs = slice.apply().unwrap();
+        let mut cs = slice.apply();
         let prefix = load_int_from_slice(&mut cs, bits, true).unwrap();
 
         let mut right = slice.clone();
@@ -2645,12 +2643,12 @@ mod tests {
     }
 
     fn extract_int(slice: &OwnedCellSlice, bits: u16) -> BigInt {
-        let cs = slice.apply().unwrap();
+        let cs = slice.apply();
         get_int_from_slice(&cs, bits, true).unwrap()
     }
 
     fn extract_uint(slice: &OwnedCellSlice, bits: u16) -> BigInt {
-        let cs = slice.apply().unwrap();
+        let cs = slice.apply();
         get_int_from_slice(&cs, bits, false).unwrap()
     }
 

@@ -1,7 +1,7 @@
 use anyhow::Result;
-use everscale_types::cell::{Cell, CellBuilder, CellFamily, Store};
+use everscale_types::cell::{Cell, CellBuilder, CellFamily, Lazy, Store};
 use everscale_types::models::{
-    BouncePhase, ExecutedBouncePhase, Lazy, MsgInfo, NoFundsBouncePhase, StorageUsedShort,
+    BouncePhase, ExecutedBouncePhase, MsgInfo, NoFundsBouncePhase, StorageUsedShort,
 };
 use everscale_types::num::Tokens;
 
@@ -57,7 +57,7 @@ impl ExecutorState<'_> {
             Some(if range.is_full(cell.as_ref()) {
                 cell.clone()
             } else {
-                CellBuilder::build_from(range.apply_allow_special(cell.as_ref()))?
+                CellBuilder::build_from(range.apply_allow_exotic(cell.as_ref()))?
             })
         } else {
             None
@@ -158,7 +158,7 @@ impl ExecutorState<'_> {
             let body_prefix = {
                 let (cell, range) = &ctx.received_message.body;
                 range
-                    .apply_allow_special(cell.as_ref())
+                    .apply_allow_exotic(cell.as_ref())
                     .get_prefix(ROOT_BODY_BITS, 0)
             };
 
@@ -189,7 +189,8 @@ impl ExecutorState<'_> {
                 b.store_reference(child)?
             }
 
-            Lazy::from_raw(b.build()?)
+            // SAFETY: `b` is an ordinary cell.
+            unsafe { Lazy::from_raw_unchecked(b.build()?) }
         };
 
         // Add message to output.
@@ -214,7 +215,7 @@ mod tests {
     use crate::tests::{make_default_config, make_default_params, make_message};
 
     fn apply_cs((cell, range): &CellSliceParts) -> CellSlice<'_> {
-        range.apply_allow_special(cell)
+        range.apply_allow_exotic(cell)
     }
 
     #[test]

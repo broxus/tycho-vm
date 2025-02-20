@@ -11,6 +11,7 @@ use everscale_types::prelude::*;
 
 use crate::saferc::SafeRc;
 use crate::stack::Stack;
+use crate::OwnedCellSlice;
 
 /// Initialization params for [`GasConsumer`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -447,6 +448,11 @@ impl<'l> GasConsumer<'l> {
         self.missing_library.set(Some(*hash));
     }
 
+    pub fn load_cell_as_slice(&self, cell: Cell, mode: LoadMode) -> Result<OwnedCellSlice, Error> {
+        let cell = ok!(self.load_cell_impl(cell, mode));
+        Ok(OwnedCellSlice::new_allow_exotic(cell))
+    }
+
     fn load_cell_impl<'s: 'a, 'a, T: LoadLibrary<'a>>(
         &'s self,
         mut cell: T,
@@ -480,7 +486,7 @@ impl<'l> GasConsumer<'l> {
                     let mut library_hash = HashBytes::ZERO;
                     ok!(cell
                         .as_ref()
-                        .as_slice_allow_pruned()
+                        .as_slice_allow_exotic()
                         .get_raw(8, &mut library_hash.0, 256));
 
                     let Some(library_cell) = ok!(T::load_library(self, &library_hash)) else {

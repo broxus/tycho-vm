@@ -155,9 +155,10 @@ impl ExecutorState<'_> {
 mod tests {
     use anyhow::Result;
     use everscale_asm_macros::tvmasm;
+    use everscale_types::cell::Lazy;
     use everscale_types::models::{
         Account, AccountState, AccountStatusChange, CurrencyCollection, ExtInMsgInfo, IntMsgInfo,
-        Lazy, MsgInfo, OptionalAccount, ShardAccount, StateInit, StdAddr, StorageInfo, StorageUsed,
+        MsgInfo, OptionalAccount, ShardAccount, StateInit, StdAddr, StorageInfo, StorageUsed,
         TxInfo,
     };
     use everscale_types::num::VarUint56;

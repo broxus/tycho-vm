@@ -236,7 +236,7 @@ impl ExecutorState<'_> {
         // Run vm.
         let stack = self.prepare_vm_stack(ctx.input);
 
-        let mut code = res.new_state.code.clone();
+        let code = res.new_state.code.clone();
 
         let smc_info = SmcInfoBase::new()
             .with_now(self.params.block_unixtime)
@@ -254,17 +254,10 @@ impl ExecutorState<'_> {
             .with_unpacked_config(self.config.unpacked.as_tuple())
             .require_ton_v9();
 
-        // Special case for library cells as code root.
-        if let Some(code) = &mut code {
-            if code.is_exotic() {
-                *code = CellBuilder::build_from(&*code).unwrap();
-            }
-        }
-
         let libraries = (msg_libs, state_libs, &self.params.libraries);
         let mut vm = VmState::builder()
             .with_smc_info(smc_info)
-            .with_code_opt(code)
+            .with_code(code)
             .with_data(res.new_state.data.clone().unwrap_or_default())
             .with_libraries(&libraries)
             .with_init_selector(false)

@@ -28,7 +28,7 @@ impl CurrencyOps {
 
         let int;
         let cs_range = {
-            let mut cs = csr.apply()?;
+            let mut cs = csr.apply();
             int = load_varint(&mut cs, len_bits, signed)?;
             cs.range()
         };
@@ -60,7 +60,7 @@ impl CurrencyOps {
         let stack = SafeRc::make_mut(&mut st.stack);
         let mut csr = ok!(stack.pop_cs());
 
-        let mut cs = csr.apply()?;
+        let mut cs = csr.apply();
         let mut addr = cs;
         match skip_message_addr(&mut cs) {
             Ok(()) => {
@@ -176,8 +176,8 @@ fn rewrite_addr_var(
         return Ok(pfx);
     }
 
-    let mut cs = addr.apply()?;
-    let pfx = pfx.apply()?;
+    let mut cs = addr.apply();
+    let pfx = pfx.apply();
     cs.skip_first(pfx.size_bits(), 0)?;
 
     let mut cb = CellBuilder::new();
@@ -186,14 +186,14 @@ fn rewrite_addr_var(
     let cell = cb.build_ext(gas)?;
     // NOTE: Consume gas without resolving (we already know that it's ordinary).
     let cell = gas.load_cell(cell, LoadMode::UseGas)?;
-    Ok(OwnedCellSlice::from(cell))
+    Ok(OwnedCellSlice::new_allow_exotic(cell))
 }
 
 fn rewrite_addr_std(addr: OwnedCellSlice, pfx: Option<OwnedCellSlice>) -> Result<BigInt, Error> {
-    let mut addr = addr.apply()?.load_u256()?.0;
+    let mut addr = addr.apply().load_u256()?.0;
 
     if let Some(pfx) = pfx {
-        let mut pfx = pfx.apply()?;
+        let mut pfx = pfx.apply();
         let pfx_len = pfx.size_bits();
 
         let mut buffer = [0u8; 4];
@@ -413,10 +413,10 @@ mod test {
         let int = BigInt::from(5);
         let mut builder = CellBuilder::new();
         store_varint(&int, 4, true, &mut builder)?;
-        let mut slice = OwnedCellSlice::from(builder.build()?);
+        let mut slice = OwnedCellSlice::new_allow_exotic(builder.build()?);
         let value = SafeRc::new_dyn_value(slice.clone());
 
-        let mut cs = slice.apply()?;
+        let mut cs = slice.apply();
         cs.skip_first(12, 0)?;
         slice.set_range(cs.range());
 
@@ -432,10 +432,10 @@ mod test {
         let int = BigInt::from(5);
         let mut builder = CellBuilder::new();
         store_varint(&int, 5, true, &mut builder)?;
-        let mut slice = OwnedCellSlice::from(builder.build()?);
+        let mut slice = OwnedCellSlice::new_allow_exotic(builder.build()?);
         let value = SafeRc::new_dyn_value(slice.clone());
 
-        let mut cs = slice.apply()?;
+        let mut cs = slice.apply();
         cs.skip_first(13, 0)?;
         slice.set_range(cs.range());
 
@@ -449,10 +449,10 @@ mod test {
     fn parse_message_address() -> anyhow::Result<()> {
         let addr = "0:6301b2c75596e6e569a6d13ae4ec70c94f177ece0be19f968ddce73d44e7afc7"
             .parse::<StdAddr>()?;
-        let mut addr = OwnedCellSlice::from(CellBuilder::build_from(addr)?);
+        let mut addr = OwnedCellSlice::new_allow_exotic(CellBuilder::build_from(addr)?);
         let value = SafeRc::new_dyn_value(addr.clone());
 
-        let mut cs = addr.apply().unwrap();
+        let mut cs = addr.apply();
         cs.skip_first(11, 0).unwrap();
         addr.set_range(cs.range());
 

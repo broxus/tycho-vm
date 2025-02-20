@@ -12,17 +12,13 @@ use num_traits::{ToPrimitive, Zero};
 pub struct OwnedCellSlice(CellSliceParts);
 
 impl OwnedCellSlice {
-    pub fn new(cell: Cell) -> Self {
+    pub fn new_allow_exotic(cell: Cell) -> Self {
         let range = CellSliceRange::full(cell.as_ref());
         Self((cell, range))
     }
 
-    pub fn apply(&self) -> Result<CellSlice<'_>, Error> {
-        self.range().apply(self.cell())
-    }
-
-    pub fn apply_allow_special(&self) -> CellSlice<'_> {
-        self.range().apply_allow_special(self.cell())
+    pub fn apply(&self) -> CellSlice<'_> {
+        self.range().apply_allow_exotic(self.cell())
     }
 
     #[inline]
@@ -70,13 +66,6 @@ impl std::fmt::Display for OwnedCellSlice {
     }
 }
 
-impl From<Cell> for OwnedCellSlice {
-    #[inline]
-    fn from(value: Cell) -> Self {
-        Self::new(value)
-    }
-}
-
 impl From<CellSliceParts> for OwnedCellSlice {
     #[inline]
     fn from(parts: CellSliceParts) -> Self {
@@ -86,7 +75,7 @@ impl From<CellSliceParts> for OwnedCellSlice {
 
 impl PartialEq<CellSlice<'_>> for OwnedCellSlice {
     fn eq(&self, right: &CellSlice<'_>) -> bool {
-        let left = self.apply_allow_special();
+        let left = self.apply();
         matches!(left.contents_eq(right), Ok(true))
     }
 }

@@ -113,7 +113,7 @@ impl Stack {
             5 => {
                 let cell = ok!(slice.load_reference());
                 let mut builder = CellBuilder::new();
-                ok!(builder.store_slice(cell.as_slice_allow_pruned()));
+                ok!(builder.store_slice(cell.as_slice_allow_exotic()));
                 SafeRc::new_dyn_value(builder)
             }
             // vm_stk_cont#06 cont:VmCont = VmStackValue;
@@ -1492,10 +1492,10 @@ mod tests {
                 Cell::default(),
             ))
             .unwrap();
-            let mut cs = OwnedCellSlice::from(cell);
+            let mut cs = OwnedCellSlice::new_allow_exotic(cell);
 
             {
-                let mut slice = cs.apply().unwrap();
+                let mut slice = cs.apply();
                 slice.skip_first(16, 1).unwrap();
                 slice.skip_last(8, 0).unwrap();
                 cs.set_range(slice.range());

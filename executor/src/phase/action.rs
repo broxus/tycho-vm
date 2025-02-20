@@ -1,11 +1,10 @@
 use anyhow::Result;
-use everscale_types::cell::CellTreeStats;
+use everscale_types::cell::{CellTreeStats, Lazy};
 use everscale_types::error::Error;
 use everscale_types::models::{
     AccountState, AccountStatus, AccountStatusChange, ActionPhase, ChangeLibraryMode,
-    CurrencyCollection, ExecutedComputePhase, Lazy, LibRef, OutAction, OwnedMessage,
-    OwnedRelaxedMessage, RelaxedMsgInfo, ReserveCurrencyFlags, SendMsgFlags, SimpleLib, StateInit,
-    StorageUsedShort,
+    CurrencyCollection, ExecutedComputePhase, LibRef, OutAction, OwnedMessage, OwnedRelaxedMessage,
+    RelaxedMsgInfo, ReserveCurrencyFlags, SendMsgFlags, SimpleLib, StateInit, StorageUsedShort,
 };
 use everscale_types::num::{Tokens, VarUint56};
 use everscale_types::prelude::*;
@@ -85,7 +84,7 @@ impl ExecutorState<'_> {
             }
 
             // NOTE: We have checked that this cell is an ordinary.
-            let mut cs = actions.as_slice_allow_pruned();
+            let mut cs = actions.as_slice_allow_exotic();
             if cs.is_empty() {
                 // Actions list terminates with an empty cell.
                 break;
@@ -119,7 +118,7 @@ impl ExecutorState<'_> {
         // Parse actions.
         let mut parsed_list = Vec::with_capacity(list.len());
         for (action_idx, item) in list.into_iter().rev().enumerate() {
-            let mut cs = item.as_slice_allow_pruned();
+            let mut cs = item.as_slice_allow_exotic();
             cs.load_reference().ok(); // Skip first reference.
 
             // Try to parse one action.
@@ -353,7 +352,7 @@ impl ExecutorState<'_> {
         };
 
         // Output message must be an ordinary cell.
-        if out_msg.inner().is_exotic() {
+        if out_msg.is_exotic() {
             return Err(ActionFailed);
         }
 
@@ -363,7 +362,7 @@ impl ExecutorState<'_> {
         let mut body_cs;
 
         {
-            let mut cs = out_msg.inner().as_slice_allow_pruned();
+            let mut cs = out_msg.as_slice_allow_exotic();
 
             relaxed_info = RelaxedMsgInfo::load_from(&mut cs)?;
             state_init_cs = load_state_init_as_slice(&mut cs)?;
@@ -620,7 +619,7 @@ impl ExecutorState<'_> {
         update_total_msg_stat(
             &mut ctx.action_phase.total_message_size,
             stats,
-            msg.inner().bit_len(),
+            msg.bit_len(),
         );
 
         ctx.action_phase.messages_created += 1;
@@ -931,7 +930,7 @@ fn load_state_init_as_slice<'a>(cs: &mut CellSlice<'a>) -> Result<CellSlice<'a>,
             }
 
             // Validate `StateInit` by reading.
-            let mut cs = state_root.as_slice_allow_pruned();
+            let mut cs = state_root.as_slice_allow_exotic();
             StateInit::load_from(&mut cs)?;
 
             // And ensure that nothing more was left.
@@ -1003,7 +1002,10 @@ fn build_message(
     state_init_cs: &CellSlice<'_>,
     body_cs: &CellSlice<'_>,
 ) -> Result<Lazy<OwnedMessage>, Error> {
-    CellBuilder::build_from((info, state_init_cs, body_cs)).map(Lazy::from_raw)
+    CellBuilder::build_from((info, state_init_cs, body_cs)).map(|cell| {
+        // SAFETY: Tuple is always built as ordinary cell.
+        unsafe { Lazy::from_raw_unchecked(cell) }
+    })
 }
 
 fn update_total_msg_stat(
@@ -1117,23 +1119,23 @@ mod tests {
         body: Option<CellBuilder>,
     ) -> Lazy<OwnedRelaxedMessage> {
         let body = match &body {
-            None => Cell::empty_cell_ref().as_slice_allow_pruned(),
+            None => Cell::empty_cell_ref().as_slice_allow_exotic(),
             Some(cell) => cell.as_full_slice(),
         };
-        CellBuilder::build_from(RelaxedMessage {
+        Lazy::new(&RelaxedMessage {
             info: info.into(),
             init,
             body,
             layout: None,
         })
-        .map(Lazy::from_raw)
         .unwrap()
+        .cast_into()
     }
 
     fn compute_full_stats(msg: &Lazy<OwnedMessage>) -> StorageUsedShort {
         let stats = {
             let mut stats = ExtStorageStat::with_limits(StorageStatLimits::UNLIMITED);
-            assert!(stats.add_cell(msg.inner().as_ref()));
+            assert!(stats.add_cell(msg.as_ref()));
             stats.stats()
         };
         StorageUsedShort {

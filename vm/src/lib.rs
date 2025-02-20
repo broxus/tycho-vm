@@ -198,7 +198,8 @@ pub use self::stack::{
     NaN, RcStackValue, Stack, StackValue, StackValueType, StaticStackValue, Tuple, TupleExt,
 };
 pub use self::state::{
-    BehaviourModifiers, CommitedState, InitSelectorParams, SaveCr, VmState, VmStateBuilder,
+    BehaviourModifiers, CommitedState, InitSelectorParams, IntoCode, SaveCr, VmState,
+    VmStateBuilder,
 };
 pub use self::util::OwnedCellSlice;
 

@@ -4,7 +4,6 @@ use tycho_vm_proc::vm_module;
 use crate::dispatch::Opcodes;
 use crate::error::VmResult;
 use crate::state::VmState;
-use crate::util::remove_trailing;
 
 pub struct DebugOps;
 
@@ -50,12 +49,7 @@ impl DebugOps {
         if let Some(value) = st.stack.items.last() {
             if let Some(slice) = value.as_cell_slice() {
                 // TODO: print as string, but why is it needed?
-                writeln!(
-                    &mut *debug,
-                    "#DEBUG#: {}",
-                    slice.apply_allow_special().display_data()
-                )
-                .unwrap();
+                writeln!(&mut *debug, "#DEBUG#: {}", slice.apply().display_data()).unwrap();
             } else {
                 writeln!(&mut *debug, "#DEBUG#: is not a slice").unwrap();
             }
@@ -98,16 +92,7 @@ impl DebugOps {
             st.code.range().has_remaining(bits + data_bits, 0),
             InvalidOpcode
         );
-        let ok = st.code.range_mut().skip_first(bits, 0).is_ok();
-        debug_assert!(ok);
-
-        let mut prefix = st.code.apply_allow_special().get_prefix(data_bits, 0);
-        remove_trailing(&mut prefix)?;
-
-        println!("{}", prefix.size_bits());
-        vm_log_op!("DEBUGSTR {}", prefix.display_data());
-
-        let ok = st.code.range_mut().skip_first(data_bits, 0).is_ok();
+        let ok = st.code.range_mut().skip_first(bits + data_bits, 0).is_ok();
         debug_assert!(ok);
 
         Ok(0)

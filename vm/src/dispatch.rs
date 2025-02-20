@@ -51,7 +51,7 @@ impl DispatchTable {
     }
 
     pub fn dispatch(&self, st: &mut VmState) -> VmResult<i32> {
-        let (opcode, bits) = Self::get_opcode_from_slice(&st.code.apply()?);
+        let (opcode, bits) = Self::get_opcode_from_slice(&st.code.apply());
         let op = self.lookup(opcode);
         op.dispatch(st, opcode, bits)
     }

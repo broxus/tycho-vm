@@ -61,7 +61,9 @@ impl VmError {
             Self::CellError(e) => match e {
                 Error::CellUnderflow => VmException::CellUnderflow,
                 Error::CellOverflow => VmException::CellOverflow,
-                Error::PrunedBranchAccess => VmException::VirtError,
+                Error::UnexpectedExoticCell | Error::UnexpectedOrdinaryCell => {
+                    VmException::VirtError
+                }
                 Error::Cancelled => VmException::OutOfGas, // ?
                 Error::IntOverflow => VmException::IntOverflow,
                 _ => VmException::Fatal, // ?

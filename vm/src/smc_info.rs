@@ -216,7 +216,7 @@ impl SmcInfoBase {
         // balance_remaining:[Integer (Maybe Cell)]
         items.push(balance_as_tuple(&self.account_balance).into_dyn_value());
         // myself:MsgAddressInt
-        items.push(SafeRc::new_dyn_value(OwnedCellSlice::from(
+        items.push(SafeRc::new_dyn_value(OwnedCellSlice::new_allow_exotic(
             CellBuilder::build_from(&self.addr).unwrap(),
         )));
         // global_config:(Maybe Cell) ] = SmartContractInfo;
@@ -359,7 +359,9 @@ impl SmcInfoTonV6 {
             let Some(value) = params.as_dict().get(id)? else {
                 return Ok(Stack::make_null());
             };
-            Ok(SafeRc::new_dyn_value(OwnedCellSlice::from(value)))
+            Ok(SafeRc::new_dyn_value(OwnedCellSlice::new_allow_exotic(
+                value,
+            )))
         };
 
         Ok(SafeRc::new(vec![
@@ -402,7 +404,7 @@ impl SmcInfoTonV6 {
             let value = value?;
 
             // First 32 bits of value is unix timestamp.
-            let utime_since = value.1.apply_allow_special(&value.0).load_u32()?;
+            let utime_since = value.1.apply_allow_exotic(&value.0).load_u32()?;
             if now < utime_since {
                 continue;
             }
@@ -526,12 +528,30 @@ impl UnpackedConfig {
 
     fn slice_or_null<T>(slice: Option<T>) -> RcStackValue
     where
-        OwnedCellSlice: From<T>,
+        T: IntoSliceUnchecked,
     {
         match slice {
             None => Stack::make_null(),
-            Some(slice) => SafeRc::new_dyn_value(OwnedCellSlice::from(slice)),
+            Some(slice) => SafeRc::new_dyn_value(slice.into_slice_unchecked()),
         }
+    }
+}
+
+trait IntoSliceUnchecked {
+    fn into_slice_unchecked(self) -> OwnedCellSlice;
+}
+
+impl IntoSliceUnchecked for Cell {
+    #[inline]
+    fn into_slice_unchecked(self) -> OwnedCellSlice {
+        OwnedCellSlice::new_allow_exotic(self)
+    }
+}
+
+impl IntoSliceUnchecked for CellSliceParts {
+    #[inline]
+    fn into_slice_unchecked(self) -> OwnedCellSlice {
+        OwnedCellSlice::from(self)
     }
 }
 

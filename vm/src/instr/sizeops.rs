@@ -41,7 +41,7 @@ impl SizeOps {
                     actual: value.ty()
                 })
             };
-            let cs = slice.apply()?;
+            let cs = slice.apply();
             ok!(storage.add_slice(&cs))
         } else {
             let Some(cell) = value.as_cell() else {
@@ -178,7 +178,7 @@ mod tests {
         assert_run_vm!("CDATASIZEQ", [cell empty_cell.clone(), int 0] => [int 0]);
         assert_run_vm!("CDATASIZEQ", [cell empty_cell.clone(), nan] => [int 0], exit_code: 4);
 
-        let empty_slice = OwnedCellSlice::from(empty_cell);
+        let empty_slice = OwnedCellSlice::new_allow_exotic(empty_cell);
         assert_run_vm!("SDATASIZE", [slice empty_slice.clone(), int 10] => [int 0, int 0, int 0]);
         assert_run_vm!("SDATASIZE", [slice empty_slice.clone(), int 0] => [int 0, int 0, int 0]);
         assert_run_vm!("SDATASIZEQ", [slice empty_slice.clone(), int 10] => [int 0, int 0, int 0, int -1]);
@@ -188,7 +188,7 @@ mod tests {
         assert_run_vm!("CDATASIZE", [cell plain_cell.clone(), int 1] => [int 1, int 8 + 32 + 1, int 0]);
         assert_run_vm!("CDATASIZEQ", [cell plain_cell.clone(), int 1] => [int 1, int 8 + 32 + 1, int 0, int -1]);
 
-        let plain_slice = OwnedCellSlice::from(plain_cell);
+        let plain_slice = OwnedCellSlice::new_allow_exotic(plain_cell);
         assert_run_vm!("SDATASIZE", [slice plain_slice.clone(), int 1] => [int 0, int 8 + 32 + 1, int 0]);
         assert_run_vm!("SDATASIZEQ", [slice plain_slice.clone(), int 1] => [int 0, int 8 + 32 + 1, int 0, int -1]);
 
@@ -199,7 +199,7 @@ mod tests {
         assert_run_vm!("CDATASIZE", [cell one_ref_cell.clone(), int 1] => [int 0], exit_code: 8);
         assert_run_vm!("CDATASIZEQ", [cell one_ref_cell.clone(), int 1] => [int 0]);
 
-        let one_ref_slice = OwnedCellSlice::from(one_ref_cell);
+        let one_ref_slice = OwnedCellSlice::new_allow_exotic(one_ref_cell);
         assert_run_vm!("SDATASIZE", [slice one_ref_slice.clone(), int 1] => [int 1, int 8 + 32 + 1, int 1]);
         assert_run_vm!("SDATASIZEQ", [slice one_ref_slice.clone(), int 1] => [int 1, int 8 + 32 + 1, int 1, int -1]);
         assert_run_vm!("SDATASIZE", [slice one_ref_slice.clone(), int 0] => [int 0], exit_code: 8);
@@ -218,7 +218,7 @@ mod tests {
         assert_run_vm!("CDATASIZE", [cell deep_cell.clone(), int 101] => [int 101, int 256, int 100 * 4]);
         assert_run_vm!("CDATASIZEQ", [cell deep_cell.clone(), int 100] => [int 0]);
 
-        let deep_slice = OwnedCellSlice::from(deep_cell);
+        let deep_slice = OwnedCellSlice::new_allow_exotic(deep_cell);
         assert_run_vm!("SDATASIZE", [slice deep_slice.clone(), int 100] => [int 100, int 256, int 100 * 4]);
         assert_run_vm!("SDATASIZEQ", [slice deep_slice.clone(), int 99] => [int 0]);
 
@@ -240,7 +240,7 @@ mod tests {
         assert_run_vm!("CDATASIZE", gas: 10000, [cell huge_cell.clone(), int 2048] => [int 9926], exit_code: -14);
         assert_run_vm!("CDATASIZEQ", gas: 10000, [cell huge_cell.clone(), int 2048] => [int 9926], exit_code: -14);
 
-        let huge_slice = OwnedCellSlice::from(huge_cell);
+        let huge_slice = OwnedCellSlice::new_allow_exotic(huge_cell);
         assert_run_vm!("SDATASIZE", [slice huge_slice.clone(), int 2048] => [int 2046, int 524032, int 2046]);
         assert_run_vm!("SDATASIZEQ", [slice huge_slice.clone(), int 100] => [int 0]);
         assert_run_vm!("SDATASIZE", gas: 10000, [slice huge_slice.clone(), int 2048] => [int 9926], exit_code: -14);

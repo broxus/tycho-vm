@@ -108,13 +108,8 @@ impl<'a> VmStateBuilder<'a> {
         self
     }
 
-    pub fn with_code<T: Into<OwnedCellSlice>>(mut self, code: T) -> Self {
-        self.code = Some(code.into());
-        self
-    }
-
-    pub fn with_code_opt<T: Into<OwnedCellSlice>>(mut self, code: Option<T>) -> Self {
-        self.code = code.map(Into::into);
+    pub fn with_code<T: IntoCode>(mut self, code: T) -> Self {
+        self.code = code.into_code().ok();
         self
     }
 
@@ -154,6 +149,51 @@ impl<'a> VmStateBuilder<'a> {
     pub fn with_version(mut self, version: VmVersion) -> Self {
         self.version = Some(version);
         self
+    }
+}
+
+/// Anything that can be used as a VM code source.
+pub trait IntoCode {
+    fn into_code(self) -> Result<OwnedCellSlice, Error>;
+}
+
+impl<T: IntoCode> IntoCode for Option<T> {
+    fn into_code(self) -> Result<OwnedCellSlice, Error> {
+        match self {
+            Some(code) => code.into_code(),
+            None => Err(Error::CellUnderflow),
+        }
+    }
+}
+
+impl IntoCode for CellSliceParts {
+    #[inline]
+    fn into_code(self) -> Result<OwnedCellSlice, Error> {
+        Ok(OwnedCellSlice::from(self))
+    }
+}
+
+impl IntoCode for OwnedCellSlice {
+    #[inline]
+    fn into_code(self) -> Result<OwnedCellSlice, Error> {
+        Ok(self)
+    }
+}
+
+impl IntoCode for Cell {
+    fn into_code(mut self) -> Result<OwnedCellSlice, Error> {
+        let descriptor = self.descriptor();
+        if descriptor.is_exotic() {
+            if descriptor.is_library() {
+                // Special case for library cells as code root.
+                self = CellBuilder::build_from(self).unwrap();
+            } else {
+                // All other types are considered invalid.
+                return Err(Error::UnexpectedExoticCell);
+            }
+        }
+
+        Ok(OwnedCellSlice::new_allow_exotic(self))
     }
 }
 
@@ -213,10 +253,10 @@ impl<'a> VmState<'a> {
         } else if !self.code.range().is_refs_empty() {
             vm_log_op!("implicit JMPREF");
 
-            let next_cell = self.code.apply()?.get_reference_cloned(0)?;
+            let next_cell = self.code.apply().get_reference_cloned(0)?;
 
             self.gas.try_consume_implicit_jmpref_gas()?;
-            let code = self.gas.load_cell(next_cell, LoadMode::Full)?.into();
+            let code = self.gas.load_cell_as_slice(next_cell, LoadMode::Full)?;
 
             let cont = SafeRc::from(OrdCont::simple(code, self.cp.id()));
             self.jump(cont)
@@ -305,8 +345,8 @@ impl<'a> VmState<'a> {
     }
 
     pub fn ref_to_cont(&mut self, code: Cell) -> VmResult<RcCont> {
-        let code = self.gas.load_cell(code, LoadMode::Full)?;
-        Ok(SafeRc::from(OrdCont::simple(code.into(), self.cp.id())))
+        let code = self.gas.load_cell_as_slice(code, LoadMode::Full)?;
+        Ok(SafeRc::from(OrdCont::simple(code, self.cp.id())))
     }
 
     pub fn c1_envelope_if(&mut self, cond: bool, cont: RcCont, save: bool) -> RcCont {
