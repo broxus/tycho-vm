@@ -2,8 +2,8 @@ use ahash::{HashMap, HashSet};
 use anyhow::Result;
 use everscale_types::error::Error;
 use everscale_types::models::{
-    BlockchainConfigParams, GasLimitsPrices, GlobalVersion, MsgForwardPrices, SizeLimitsConfig,
-    StdAddr, StorageInfo, StoragePrices, WorkchainDescription,
+    BlockchainConfig, GasLimitsPrices, GlobalVersion, MsgForwardPrices, SizeLimitsConfig, StdAddr,
+    StorageInfo, StoragePrices, WorkchainDescription,
 };
 use everscale_types::num::Tokens;
 use everscale_types::prelude::*;
@@ -23,7 +23,7 @@ pub struct ParsedConfig {
     pub global: GlobalVersion,
     pub workchains: HashMap<i32, WorkchainDescription>,
     pub special_accounts: HashSet<HashBytes>,
-    pub raw: BlockchainConfigParams,
+    pub raw: BlockchainConfig,
     pub unpacked: UnpackedConfig,
 }
 
@@ -31,8 +31,8 @@ impl ParsedConfig {
     // TODO: Pass `global_id` here as well? For now we assume that
     //       `params` will contain a global id entry (`ConfigParam19`).
     // TODO: Return error if storage prices `utime_since` is not properly sorted.
-    pub fn parse(params: BlockchainConfigParams, now: u32) -> Result<Self, Error> {
-        let dict = params.as_dict();
+    pub fn parse(config: BlockchainConfig, now: u32) -> Result<Self, Error> {
+        let dict = config.params.as_dict();
 
         let Some(mc_gas_prices_raw) = dict.get(20)? else {
             return Err(Error::CellUnderflow);
@@ -61,7 +61,7 @@ impl ParsedConfig {
             storage_prices.push(prices);
         }
 
-        let workchains_dict = params.get_workchains()?;
+        let workchains_dict = config.params.get_workchains()?;
         let mut workchains = HashMap::<i32, WorkchainDescription>::default();
         for entry in workchains_dict.iter() {
             let (workchain, desc) = entry?;
@@ -69,7 +69,7 @@ impl ParsedConfig {
         }
 
         let global_id_raw = dict.get(19)?;
-        let global = params.get_global_version()?;
+        let global = config.params.get_global_version()?;
 
         // Fallback to default if param not present in config?
         let Some(size_limits_raw) = dict.get(43)? else {
@@ -77,7 +77,7 @@ impl ParsedConfig {
         };
 
         let mut special_accounts = HashSet::default();
-        for addr in params.get_fundamental_addresses()?.keys() {
+        for addr in config.params.get_fundamental_addresses()?.keys() {
             special_accounts.insert(addr?);
         }
 
@@ -95,7 +95,7 @@ impl ParsedConfig {
             global,
             workchains,
             special_accounts,
-            raw: params,
+            raw: config,
             unpacked: UnpackedConfig {
                 latest_storage_prices,
                 global_id: global_id_raw,
@@ -109,7 +109,8 @@ impl ParsedConfig {
     }
 
     pub fn is_special(&self, addr: &StdAddr) -> bool {
-        addr.is_masterchain() && self.special_accounts.contains(&addr.address)
+        addr.is_masterchain()
+            && (self.special_accounts.contains(&addr.address) || addr.address == self.raw.address)
     }
 
     pub fn fwd_prices(&self, is_masterchain: bool) -> &MsgForwardPrices {

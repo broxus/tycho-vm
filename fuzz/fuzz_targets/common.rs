@@ -51,7 +51,7 @@ pub fn make_default_config() -> Rc<ParsedConfig> {
                 defer_out_queue_size_limit: 256,
             }).unwrap();
 
-            Rc::new(ParsedConfig::parse(config.params, u32::MAX).unwrap())
+            Rc::new(ParsedConfig::parse(config, u32::MAX).unwrap())
         };
     }
 

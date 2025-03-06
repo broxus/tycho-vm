@@ -245,7 +245,7 @@ impl ExecutorState<'_> {
             .with_mixed_rand_seed(&self.params.rand_seed, &self.address.address)
             .with_account_balance(self.balance.clone())
             .with_account_addr(self.address.clone().into())
-            .with_config(self.config.raw.clone())
+            .with_config(self.config.raw.params.clone())
             .require_ton_v4()
             .with_code(code.clone().unwrap_or_default())
             .with_message_balance(msg_balance_remaining.clone())
