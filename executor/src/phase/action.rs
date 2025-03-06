@@ -502,7 +502,7 @@ impl ExecutorState<'_> {
         // Compute size of the message.
         let stats = 'stats: {
             let mut stats = ExtStorageStat::with_limits(StorageStatLimits {
-                bit_count: u32::MAX,
+                bit_count: self.config.size_limits.max_msg_bits,
                 cell_count: max_cell_count,
             });
 
