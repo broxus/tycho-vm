@@ -1,5 +1,6 @@
 use anyhow::Result;
 use everscale_types::models::{CurrencyCollection, IntAddr, MsgInfo, StateInit};
+use everscale_types::num::Tokens;
 use everscale_types::prelude::*;
 
 use crate::util::{ExtStorageStat, StorageStatLimits};
@@ -68,10 +69,15 @@ impl ExecutorState<'_> {
                 stats.cell_count -= 1; // root cell is ignored.
                 stats.bit_count -= slice.size_bits() as u64; // bits in the root cells are free.
 
-                let fwd_fee = self
-                    .config
-                    .fwd_prices(is_masterchain)
-                    .compute_fwd_fee(stats);
+                let fwd_fee = if self.is_special {
+                    // Importing external messages on special accounts is free.
+                    // NOTE: We still need to compute and check `ExtStorageStat`.
+                    Tokens::ZERO
+                } else {
+                    self.config
+                        .fwd_prices(is_masterchain)
+                        .compute_fwd_fee(stats)
+                };
 
                 // Deduct fees.
                 if self.balance.tokens < fwd_fee {
