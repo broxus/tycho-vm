@@ -425,7 +425,7 @@ impl StackOps {
         let depth = stack.depth();
         let offset = j as usize;
         let count = i as usize;
-        vm_ensure!((count + offset) < depth, StackUnderflow(count + offset));
+        vm_ensure!((count + offset) <= depth, StackUnderflow(count + offset));
 
         stack.items.drain(depth - (count + offset)..depth - offset);
         Ok(0)
@@ -480,6 +480,16 @@ mod tests {
                 REVERSE 2, 0
             "#,
             [int 1, int 2, int 3, int 4, int 5, int 6] => [int 1, int 5, int 6]
+        );
+
+        assert_run_vm!("BLKDROP2 2, 2", [int 1, int 2, int 3, int 4] => [int 3, int 4]);
+        assert_run_vm!(
+            r#"
+                REVERSE 4, 0
+                BLKDROP 2
+                REVERSE 2, 0
+            "#,
+            [int 1, int 2, int 3, int 4] => [int 3, int 4]
         );
     }
 }
