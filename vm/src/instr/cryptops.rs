@@ -89,9 +89,31 @@ impl CryptOps {
         Ok(0)
     }
 
-    #[op(code = "f910", fmt = "CHKSIGNU", args(from_slice = false))]
-    #[op(code = "f911", fmt = "CHKSIGNS", args(from_slice = true))]
-    fn exec_ed25519_check_signature(st: &mut VmState, from_slice: bool) -> VmResult<i32> {
+    #[op(
+        code = "f910",
+        fmt = "CHKSIGNU",
+        args(from_slice = false, can_use_id = true)
+    )]
+    #[op(
+        code = "f911",
+        fmt = "CHKSIGNS",
+        args(from_slice = true, can_use_id = true)
+    )]
+    #[op(
+        code = "f916",
+        fmt = "ED25519_CHKSIGNU",
+        args(from_slice = false, can_use_id = false)
+    )]
+    #[op(
+        code = "f917",
+        fmt = "ED25519_CHKSIGNS",
+        args(from_slice = true, can_use_id = false)
+    )]
+    fn exec_ed25519_check_signature(
+        st: &mut VmState,
+        from_slice: bool,
+        can_use_id: bool,
+    ) -> VmResult<i32> {
         let stack = SafeRc::make_mut(&mut st.stack);
         let key_int = ok!(stack.pop_int());
         let signature_cs = ok!(stack.pop_cs());
@@ -145,7 +167,7 @@ impl CryptOps {
 
             pubkey.verify(
                 ToSign {
-                    signature_id: st.modifiers.signature_with_id,
+                    signature_id: st.modifiers.signature_with_id.filter(|_| can_use_id),
                     data: &data[..data_len],
                 },
                 &signature,
