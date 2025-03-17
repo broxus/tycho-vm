@@ -2,8 +2,8 @@ use ahash::{HashMap, HashSet};
 use anyhow::Result;
 use everscale_types::error::Error;
 use everscale_types::models::{
-    BlockchainConfig, GasLimitsPrices, GlobalVersion, MsgForwardPrices, SizeLimitsConfig, StdAddr,
-    StorageInfo, StoragePrices, WorkchainDescription,
+    BlockchainConfig, BurningConfig, GasLimitsPrices, GlobalVersion, MsgForwardPrices,
+    SizeLimitsConfig, StdAddr, StorageInfo, StoragePrices, WorkchainDescription,
 };
 use everscale_types::num::Tokens;
 use everscale_types::prelude::*;
@@ -13,6 +13,7 @@ use crate::util::shift_ceil_price;
 
 /// Parsed [`BlockchainConfigParams`].
 pub struct ParsedConfig {
+    pub blackhole_addr: Option<HashBytes>,
     pub mc_gas_prices: GasLimitsPrices,
     pub gas_prices: GasLimitsPrices,
     pub mc_fwd_prices: MsgForwardPrices,
@@ -33,6 +34,11 @@ impl ParsedConfig {
     // TODO: Return error if storage prices `utime_since` is not properly sorted.
     pub fn parse(config: BlockchainConfig, now: u32) -> Result<Self, Error> {
         let dict = config.params.as_dict();
+
+        let burning = dict.get(5).and_then(|cell| match cell {
+            Some(cell) => cell.parse::<BurningConfig>(),
+            None => Ok(BurningConfig::default()),
+        })?;
 
         let Some(mc_gas_prices_raw) = dict.get(20)? else {
             return Err(Error::CellUnderflow);
@@ -82,6 +88,7 @@ impl ParsedConfig {
         }
 
         Ok(Self {
+            blackhole_addr: burning.blackhole_addr,
             mc_gas_prices: mc_gas_prices_raw.parse::<GasLimitsPrices>()?,
             gas_prices: gas_prices_raw.parse::<GasLimitsPrices>()?,
             mc_fwd_prices: mc_fwd_prices_raw.parse::<MsgForwardPrices>()?,
@@ -106,6 +113,13 @@ impl ParsedConfig {
                 size_limits_config: Some(size_limits_raw),
             },
         })
+    }
+
+    pub fn is_blackhole(&self, addr: &StdAddr) -> bool {
+        match &self.blackhole_addr {
+            Some(blackhole_addr) => addr.is_masterchain() && addr.address == *blackhole_addr,
+            None => false,
+        }
     }
 
     pub fn is_special(&self, addr: &StdAddr) -> bool {

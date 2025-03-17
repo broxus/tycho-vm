@@ -144,6 +144,12 @@ impl ExecutorState<'_> {
             (msg_root.clone(), body_range)
         };
 
+        // Handle messages to the blackhole.
+        if self.config.is_blackhole(&self.address) {
+            self.burned = msg_balance_remaining.tokens;
+            msg_balance_remaining.tokens = Tokens::ZERO;
+        }
+
         // Done
         Ok(ReceivedMessage {
             root: msg_root,
@@ -198,12 +204,15 @@ pub struct MsgStateInit {
 
 #[cfg(test)]
 mod tests {
-
-    use everscale_types::models::{ExtInMsgInfo, ExtOutMsgInfo, IntMsgInfo, StdAddr};
+    use everscale_types::models::{
+        BurningConfig, ExtInMsgInfo, ExtOutMsgInfo, IntMsgInfo, StdAddr,
+    };
     use everscale_types::num::Tokens;
 
     use super::*;
-    use crate::tests::{make_big_tree, make_default_config, make_default_params, make_message};
+    use crate::tests::{
+        make_big_tree, make_custom_config, make_default_config, make_default_params, make_message,
+    };
 
     const OK_BALANCE: Tokens = Tokens::new(10_000_000_000);
     const STUB_ADDR: StdAddr = StdAddr::new(0, HashBytes::ZERO);
@@ -308,6 +317,58 @@ mod tests {
         assert_eq!(state.balance, prev_balance);
         // Account state must not change.
         assert_eq!(state.state, prev_acc_state);
+    }
+
+    #[test]
+    fn receive_int_to_blackhole() {
+        let addr = StdAddr::new(-1, HashBytes::ZERO);
+
+        let params = make_default_params();
+        let config = make_custom_config(|config| {
+            config.set_burning_config(&BurningConfig {
+                blackhole_addr: Some(addr.address),
+                ..Default::default()
+            })?;
+            Ok(())
+        });
+
+        let mut state = ExecutorState::new_uninit(&params, &config, &addr, OK_BALANCE);
+        let prev_start_lt = state.start_lt;
+        assert_eq!(prev_start_lt, 0);
+        let prev_balance = state.balance.clone();
+        let prev_acc_state = state.state.clone();
+
+        let msg_lt = 1000;
+        let msg_root = make_message(
+            IntMsgInfo {
+                dst: addr.into(),
+                value: OK_BALANCE.into(),
+                bounce: true,
+                created_lt: msg_lt,
+                ..Default::default()
+            },
+            None,
+            None,
+        );
+        let msg = state.receive_in_msg(msg_root).unwrap();
+        // Received message must be parsed correctly.
+        assert!(!msg.is_external);
+        assert!(msg.bounce_enabled);
+        assert!(msg.init.is_none());
+        assert!(msg.body.1.is_empty());
+        assert_eq!(msg.balance_remaining, CurrencyCollection::ZERO);
+
+        // LT must change to the message LT.
+        assert_eq!(state.start_lt, msg_lt + 1);
+        assert_eq!(state.end_lt, state.start_lt + 1);
+        // Internal message dous not require any fwd_fee on receive.
+        assert_eq!(state.total_fees, Tokens::ZERO);
+        // Balance must not change (it will change on a credit phase).
+        assert_eq!(state.balance, prev_balance);
+        // Account state must not change.
+        assert_eq!(state.state, prev_acc_state);
+        // Burned tokens must increase.
+        assert_eq!(state.burned, OK_BALANCE);
     }
 
     // === Negative ===

@@ -161,6 +161,7 @@ impl<'a> Executor<'a> {
             end_lt: start_lt + 1,
             out_msgs: Vec::new(),
             total_fees: Tokens::ZERO,
+            burned: Tokens::ZERO,
             cached_storage_stat: None,
         })
     }
@@ -186,6 +187,8 @@ pub struct ExecutorState<'a> {
     pub out_msgs: Vec<Lazy<OwnedMessage>>,
     pub total_fees: Tokens,
 
+    pub burned: Tokens,
+
     pub cached_storage_stat: Option<OwnedExtStorageStat>,
 }
 
@@ -210,6 +213,7 @@ impl<'a> ExecutorState<'a> {
             end_lt: 1,
             out_msgs: Vec::new(),
             total_fees: Tokens::ZERO,
+            burned: Tokens::ZERO,
             cached_storage_stat: None,
         }
     }
@@ -463,6 +467,7 @@ impl<'a, 's> UncommitedTransaction<'a, 's> {
             new_state_meta,
             transaction,
             transaction_meta,
+            burned: self.exec.burned,
         })
     }
 
@@ -595,6 +600,7 @@ pub struct ExecutorOutput {
     pub new_state_meta: AccountMeta,
     pub transaction: Lazy<Transaction>,
     pub transaction_meta: TransactionMeta,
+    pub burned: Tokens,
 }
 
 /// Short account description.
@@ -677,30 +683,41 @@ mod tests {
 
     pub fn make_default_config() -> Rc<ParsedConfig> {
         thread_local! {
-            pub static PARSED_CONFIG: Rc<ParsedConfig> = {
-                let mut config: BlockchainConfig = BocRepr::decode(include_bytes!("../res/config.boc")).unwrap();
-
-                config.params.set_global_id(100).unwrap();
-
-                // TODO: Update config BOC
-                config.params.set_size_limits(&SizeLimitsConfig {
-                    max_msg_bits: 1 << 21,
-                    max_msg_cells: 1 << 13,
-                    max_library_cells: 1000,
-                    max_vm_data_depth: 512,
-                    max_ext_msg_size: 65535,
-                    max_ext_msg_depth: 512,
-                    max_acc_state_cells: 1 << 16,
-                    max_acc_state_bits: (1 << 16) * 1023,
-                    max_acc_public_libraries: 256,
-                    defer_out_queue_size_limit: 256,
-                }).unwrap();
-
-                Rc::new(ParsedConfig::parse(config, u32::MAX).unwrap())
-            };
+            pub static PARSED_CONFIG: Rc<ParsedConfig> = make_custom_config(|_| Ok(()));
         }
 
         PARSED_CONFIG.with(Clone::clone)
+    }
+
+    pub fn make_custom_config<F>(f: F) -> Rc<ParsedConfig>
+    where
+        F: FnOnce(&mut BlockchainConfig) -> anyhow::Result<()>,
+    {
+        let mut config: BlockchainConfig =
+            BocRepr::decode(include_bytes!("../res/config.boc")).unwrap();
+
+        config.params.set_global_id(100).unwrap();
+
+        // TODO: Update config BOC
+        config
+            .params
+            .set_size_limits(&SizeLimitsConfig {
+                max_msg_bits: 1 << 21,
+                max_msg_cells: 1 << 13,
+                max_library_cells: 1000,
+                max_vm_data_depth: 512,
+                max_ext_msg_size: 65535,
+                max_ext_msg_depth: 512,
+                max_acc_state_cells: 1 << 16,
+                max_acc_state_bits: (1 << 16) * 1023,
+                max_acc_public_libraries: 256,
+                defer_out_queue_size_limit: 256,
+            })
+            .unwrap();
+
+        f(&mut config).unwrap();
+
+        Rc::new(ParsedConfig::parse(config, u32::MAX).unwrap())
     }
 
     pub fn make_default_params() -> ExecutorParams {

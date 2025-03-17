@@ -49,6 +49,7 @@ fuzz_target!(|input: Input| {
         end_lt: 1,
         out_msgs: Vec::new(),
         total_fees: gas_fees,
+        burned: Tokens::ZERO,
         cached_storage_stat: None,
     };
 
