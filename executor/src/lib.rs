@@ -101,7 +101,7 @@ impl<'a> Executor<'a> {
         UncommitedTransaction::with_info(exec, state, None, info).map_err(TxError::Fatal)
     }
 
-    fn begin(&self, address: &StdAddr, state: &ShardAccount) -> Result<ExecutorState<'a>> {
+    pub fn begin(&self, address: &StdAddr, state: &ShardAccount) -> Result<ExecutorState<'a>> {
         let is_special = self
             .override_special
             .unwrap_or_else(|| self.config.is_special(address));
@@ -311,7 +311,7 @@ struct BriefTxInfo {
 
 impl<'a, 's> UncommitedTransaction<'a, 's> {
     #[inline]
-    fn with_info(
+    pub fn with_info(
         exec: ExecutorState<'a>,
         original: &'s ShardAccount,
         in_msg: Option<Cell>,
