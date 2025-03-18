@@ -3,8 +3,8 @@ use everscale_types::cell::Lazy;
 use everscale_types::dict;
 use everscale_types::error::Error;
 use everscale_types::models::{
-    AccountState, AccountStatus, CurrencyCollection, HashUpdate, IntAddr, LibDescr, Message,
-    OwnedMessage, ShardAccount, SimpleLib, StdAddr, StorageInfo, StorageUsed, TickTock,
+    Account, AccountState, AccountStatus, CurrencyCollection, HashUpdate, IntAddr, LibDescr,
+    Message, OwnedMessage, ShardAccount, SimpleLib, StdAddr, StorageInfo, StorageUsed, TickTock,
     Transaction, TxInfo,
 };
 use everscale_types::num::{Tokens, Uint15, VarUint56};
@@ -83,7 +83,8 @@ impl<'a> Executor<'a> {
     {
         let msg_root = msg.load_message_root()?;
 
-        let mut exec = self.begin(address, state)?;
+        let account = state.load_account()?;
+        let mut exec = self.begin(address, account)?;
         let info = exec.run_ordinary_transaction(is_external, msg_root.clone())?;
 
         UncommitedTransaction::with_info(exec, state, Some(msg_root), info).map_err(TxError::Fatal)
@@ -95,18 +96,17 @@ impl<'a> Executor<'a> {
         kind: TickTock,
         state: &'s ShardAccount,
     ) -> TxResult<UncommitedTransaction<'a, 's>> {
-        let mut exec = self.begin(address, state)?;
+        let account = state.load_account()?;
+        let mut exec = self.begin(address, account)?;
         let info = exec.run_tick_tock_transaction(kind)?;
 
         UncommitedTransaction::with_info(exec, state, None, info).map_err(TxError::Fatal)
     }
 
-    pub fn begin(&self, address: &StdAddr, state: &ShardAccount) -> Result<ExecutorState<'a>> {
+    pub fn begin(&self, address: &StdAddr, account: Option<Account>) -> Result<ExecutorState<'a>> {
         let is_special = self
             .override_special
             .unwrap_or_else(|| self.config.is_special(address));
-
-        let account = state.load_account()?;
 
         let acc_address;
         let acc_storage_stat;
