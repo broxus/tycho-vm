@@ -73,6 +73,13 @@ impl From<CellSliceParts> for OwnedCellSlice {
     }
 }
 
+impl From<OwnedCellSlice> for CellSliceParts {
+    #[inline]
+    fn from(value: OwnedCellSlice) -> Self {
+        value.0
+    }
+}
+
 impl PartialEq<CellSlice<'_>> for OwnedCellSlice {
     fn eq(&self, right: &CellSlice<'_>) -> bool {
         let left = self.apply();
