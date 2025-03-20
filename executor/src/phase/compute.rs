@@ -20,6 +20,10 @@ pub struct ComputePhaseContext<'a> {
     pub input: TransactionInput<'a>,
     /// Fees collected during the storage phase.
     pub storage_fee: Tokens,
+    /// Accept message even without opcode.
+    ///
+    /// Should only be used as part of the `run_local` stuff.
+    pub force_accept: bool,
 }
 
 /// Parsed transaction input.
@@ -269,7 +273,7 @@ impl ExecutorState<'_> {
         let exit_code = !vm.run();
 
         // Parse VM state.
-        res.accepted = vm.gas.credit() == 0;
+        res.accepted = ctx.force_accept || vm.gas.credit() == 0;
         debug_assert!(
             is_external || res.accepted,
             "internal messages must be accepted"
@@ -438,6 +442,7 @@ mod tests {
         let compute_phase = state.compute_phase(ComputePhaseContext {
             input: TransactionInput::Ordinary(&msg),
             storage_fee: Tokens::ZERO,
+            force_accept: false,
         })?;
 
         // Original balance must be correct.
@@ -488,6 +493,7 @@ mod tests {
         let compute_phase = state.compute_phase(ComputePhaseContext {
             input: TransactionInput::Ordinary(&msg),
             storage_fee: Tokens::ZERO,
+            force_accept: false,
         })?;
 
         // Original balance must be correct.
@@ -531,6 +537,7 @@ mod tests {
         let compute_phase = state.compute_phase(ComputePhaseContext {
             input: TransactionInput::Ordinary(&msg),
             storage_fee: Tokens::ZERO,
+            force_accept: false,
         })?;
 
         // Original balance must be correct.
@@ -591,6 +598,7 @@ mod tests {
         let compute_phase = state.compute_phase(ComputePhaseContext {
             input: TransactionInput::Ordinary(&msg),
             storage_fee: Tokens::ZERO,
+            force_accept: false,
         })?;
 
         // Original balance must be correct.
@@ -662,6 +670,7 @@ mod tests {
         let compute_phase = state.compute_phase(ComputePhaseContext {
             input: TransactionInput::Ordinary(&msg),
             storage_fee: Tokens::ZERO,
+            force_accept: false,
         })?;
 
         // Original balance must be correct.
@@ -724,6 +733,7 @@ mod tests {
         let compute_phase = state.compute_phase(ComputePhaseContext {
             input: TransactionInput::Ordinary(&msg),
             storage_fee: Tokens::ZERO,
+            force_accept: false,
         })?;
 
         // Original balance must be correct.
@@ -789,6 +799,7 @@ mod tests {
         let compute_phase = state.compute_phase(ComputePhaseContext {
             input: TransactionInput::Ordinary(&msg),
             storage_fee: Tokens::ZERO,
+            force_accept: false,
         })?;
 
         // Original balance must be correct.
@@ -856,6 +867,7 @@ mod tests {
         let compute_phase = state.compute_phase(ComputePhaseContext {
             input: TransactionInput::Ordinary(&msg),
             storage_fee: Tokens::ZERO,
+            force_accept: false,
         })?;
 
         // Original balance must be correct.
@@ -908,6 +920,7 @@ mod tests {
         let compute_phase = state.compute_phase(ComputePhaseContext {
             input: TransactionInput::Ordinary(&msg),
             storage_fee: Tokens::ZERO,
+            force_accept: false,
         })?;
 
         // Original balance must be correct.
@@ -957,6 +970,7 @@ mod tests {
         let compute_phase = state.compute_phase(ComputePhaseContext {
             input: TransactionInput::Ordinary(&msg),
             storage_fee: Tokens::ZERO,
+            force_accept: false,
         })?;
 
         // Original balance must be correct.
@@ -1025,6 +1039,7 @@ mod tests {
         let compute_phase = state.compute_phase(ComputePhaseContext {
             input: TransactionInput::Ordinary(&msg),
             storage_fee: Tokens::ZERO,
+            force_accept: false,
         })?;
 
         // Original balance must be correct.
@@ -1092,6 +1107,7 @@ mod tests {
         let compute_phase = state.compute_phase(ComputePhaseContext {
             input: TransactionInput::Ordinary(&msg),
             storage_fee: Tokens::ZERO,
+            force_accept: false,
         })?;
 
         // Original balance must be correct.
@@ -1160,6 +1176,7 @@ mod tests {
         let compute_phase = state.compute_phase(ComputePhaseContext {
             input: TransactionInput::Ordinary(&msg),
             storage_fee: Tokens::ZERO,
+            force_accept: false,
         })?;
 
         // Original balance must be correct.
@@ -1224,6 +1241,7 @@ mod tests {
         let compute_phase = state.compute_phase(ComputePhaseContext {
             input: TransactionInput::Ordinary(&msg),
             storage_fee: Tokens::ZERO,
+            force_accept: false,
         })?;
 
         // Original balance must be correct.
@@ -1275,6 +1293,7 @@ mod tests {
         let compute_phase = state.compute_phase(ComputePhaseContext {
             input: TransactionInput::Ordinary(&msg),
             storage_fee: Tokens::ZERO,
+            force_accept: false,
         })?;
 
         // Original balance must be correct.
@@ -1331,6 +1350,7 @@ mod tests {
         let compute_phase = state.compute_phase(ComputePhaseContext {
             input: TransactionInput::Ordinary(&msg),
             storage_fee: Tokens::ZERO,
+            force_accept: false,
         })?;
 
         // Original balance must be correct.
@@ -1386,6 +1406,7 @@ mod tests {
         let compute_phase = state.compute_phase(ComputePhaseContext {
             input: TransactionInput::Ordinary(&msg),
             storage_fee: Tokens::ZERO,
+            force_accept: false,
         })?;
 
         // Original balance must be correct.
@@ -1435,6 +1456,7 @@ mod tests {
         let compute_phase = state.compute_phase(ComputePhaseContext {
             input: TransactionInput::TickTock(TickTock::Tick),
             storage_fee: Tokens::ZERO,
+            force_accept: false,
         })?;
 
         // Original balance must be correct.
@@ -1509,6 +1531,7 @@ mod tests {
         let compute_phase = state.compute_phase(ComputePhaseContext {
             input: TransactionInput::TickTock(TickTock::Tick),
             storage_fee: Tokens::ZERO,
+            force_accept: false,
         })?;
 
         // Original balance must be correct.
@@ -1644,6 +1667,7 @@ mod tests {
         let compute_phase = state.compute_phase(ComputePhaseContext {
             input: TransactionInput::Ordinary(&msg),
             storage_fee: Tokens::ZERO,
+            force_accept: false,
         })?;
 
         // Original balance must be correct.
