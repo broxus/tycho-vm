@@ -10,7 +10,8 @@ use tycho_vm::{tuple, SafeRc, SmcInfoBase, Stack, VmState};
 
 use crate::phase::receive::{MsgStateInit, ReceivedMessage};
 use crate::util::{
-    check_state_limits_diff, new_varuint24_truncate, new_varuint56_truncate, StateLimitsResult,
+    check_state_limits_diff, new_varuint24_truncate, new_varuint56_truncate, unlikely,
+    StateLimitsResult,
 };
 use crate::ExecutorState;
 
@@ -126,14 +127,18 @@ impl ExecutorState<'_> {
             None => (CurrencyCollection::ZERO, false),
         };
 
-        let gas = self.config.compute_gas_params(
-            &self.balance.tokens,
-            &msg_balance_remaining.tokens,
-            self.is_special,
-            is_masterchain,
-            ctx.input.is_ordinary(),
-            is_external,
-        );
+        let gas = if unlikely(ctx.force_accept) {
+            tycho_vm::GasParams::getter()
+        } else {
+            self.config.compute_gas_params(
+                &self.balance.tokens,
+                &msg_balance_remaining.tokens,
+                self.is_special,
+                is_masterchain,
+                ctx.input.is_ordinary(),
+                is_external,
+            )
+        };
         if gas.limit == 0 && gas.credit == 0 {
             res.compute_phase = ComputePhase::Skipped(SkippedComputePhase {
                 reason: ComputePhaseSkipReason::NoGas,
