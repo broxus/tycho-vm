@@ -10,7 +10,7 @@ use syn::ItemImpl;
 struct VmInstrArgs {
     code: SpannedValue<String>,
 
-    #[darling(with = "parse_expr::preserve_str_literal")]
+    #[darling(with = parse_expr::preserve_str_literal)]
     fmt: syn::Expr,
 
     #[darling(default)]
