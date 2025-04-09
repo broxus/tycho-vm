@@ -2,8 +2,8 @@ use ahash::{HashMap, HashSet};
 use anyhow::Result;
 use everscale_types::error::Error;
 use everscale_types::models::{
-    BlockchainConfig, BurningConfig, GasLimitsPrices, GlobalVersion, MsgForwardPrices,
-    SizeLimitsConfig, StdAddr, StorageInfo, StoragePrices, WorkchainDescription,
+    BlockchainConfig, BlockchainConfigParams, BurningConfig, GasLimitsPrices, GlobalVersion,
+    MsgForwardPrices, SizeLimitsConfig, StdAddr, StorageInfo, StoragePrices, WorkchainDescription,
 };
 use everscale_types::num::Tokens;
 use everscale_types::prelude::*;
@@ -54,18 +54,10 @@ impl ParsedConfig {
             return Err(Error::CellUnderflow);
         };
 
-        let storage_prices_dict = RawDict::<32>::from(dict.get(18)?);
-        let mut storage_prices = Vec::new();
-        let mut latest_storage_prices = None;
-        for value in storage_prices_dict.values_owned() {
-            let value = value?;
-            let prices = StoragePrices::load_from(&mut value.1.apply_allow_exotic(&value.0))?;
-            if prices.utime_since <= now {
-                latest_storage_prices = Some(value);
-            }
-
-            storage_prices.push(prices);
-        }
+        let ParsedStoragePrices {
+            latest_storage_prices,
+            storage_prices,
+        } = parse_storage_prices(&config.params, now)?;
 
         let workchains_dict = config.params.get_workchains()?;
         let mut workchains = HashMap::<i32, WorkchainDescription>::default();
@@ -113,6 +105,17 @@ impl ParsedConfig {
                 size_limits_config: Some(size_limits_raw),
             },
         })
+    }
+
+    pub fn update_storage_prices(&mut self, now: u32) -> Result<(), Error> {
+        let ParsedStoragePrices {
+            latest_storage_prices,
+            storage_prices,
+        } = parse_storage_prices(&self.raw.params, now)?;
+
+        self.storage_prices = storage_prices;
+        self.unpacked.latest_storage_prices = latest_storage_prices;
+        Ok(())
     }
 
     pub fn is_blackhole(&self, addr: &StdAddr) -> bool {
@@ -251,6 +254,34 @@ impl ParsedConfig {
             price: prices.gas_price,
         }
     }
+}
+
+fn parse_storage_prices(
+    config: &BlockchainConfigParams,
+    now: u32,
+) -> Result<ParsedStoragePrices, Error> {
+    let storage_prices_dict = RawDict::<32>::from(config.as_dict().get(18)?);
+    let mut storage_prices = Vec::new();
+    let mut latest_storage_prices = None;
+    for value in storage_prices_dict.values_owned() {
+        let value = value?;
+        let prices = StoragePrices::load_from(&mut value.1.apply_allow_exotic(&value.0))?;
+        if prices.utime_since <= now {
+            latest_storage_prices = Some(value);
+        }
+
+        storage_prices.push(prices);
+    }
+
+    Ok(ParsedStoragePrices {
+        latest_storage_prices,
+        storage_prices,
+    })
+}
+
+struct ParsedStoragePrices {
+    latest_storage_prices: Option<CellSliceParts>,
+    storage_prices: Vec<StoragePrices>,
 }
 
 fn gas_bought_for(prices: &GasLimitsPrices, balance: &Tokens) -> u64 {

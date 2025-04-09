@@ -1436,7 +1436,7 @@ fn exec_store_int_common(stack: &mut Stack, bits: u16, args: StoreIntArgs) -> Vm
                     Cow::Borrowed(x.as_ref())
                 };
 
-                let minimal_bytes = ((bits + 7) / 8) as usize;
+                let minimal_bytes = bits.div_ceil(8) as usize;
 
                 let (prefix, mut bytes) = if args.is_signed() {
                     let bytes = int.to_signed_bytes_le();
