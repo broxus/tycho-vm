@@ -8,13 +8,14 @@ use crate::phase::{
     ActionPhaseContext, BouncePhaseContext, ComputePhaseContext, ComputePhaseFull,
     StoragePhaseContext, TransactionInput,
 };
-use crate::ExecutorState;
+use crate::{ExecutorInspector, ExecutorState};
 
 impl ExecutorState<'_> {
     pub fn run_ordinary_transaction(
         &mut self,
         is_external: bool,
         msg_root: Cell,
+        inspector: Option<&mut ExecutorInspector<'_>>,
     ) -> TxResult<OrdinaryTxInfo> {
         // Receive inbound message.
         let mut msg = match self.receive_in_msg(msg_root) {
@@ -77,6 +78,7 @@ impl ExecutorState<'_> {
                 input: TransactionInput::Ordinary(&msg),
                 storage_fee: storage_phase.storage_fees_collected,
                 force_accept: false,
+                inspector,
             })
             .context("compute phase failed")?;
 
@@ -309,6 +311,7 @@ mod tests {
                 None,
                 None,
             ),
+            None,
         )?;
 
         assert!(!info.aborted);

@@ -71,6 +71,7 @@ impl<'a> Executor<'a> {
         self
     }
 
+    #[inline]
     pub fn begin_ordinary<'s, M>(
         &self,
         address: &StdAddr,
@@ -81,24 +82,49 @@ impl<'a> Executor<'a> {
     where
         M: LoadMessage,
     {
+        self.begin_ordinary_ext(address, is_external, msg, state, None)
+    }
+
+    pub fn begin_ordinary_ext<'s, M>(
+        &self,
+        address: &StdAddr,
+        is_external: bool,
+        msg: M,
+        state: &'s ShardAccount,
+        inspector: Option<&mut ExecutorInspector<'_>>,
+    ) -> TxResult<UncommitedTransaction<'a, 's>>
+    where
+        M: LoadMessage,
+    {
         let msg_root = msg.load_message_root()?;
 
         let account = state.load_account()?;
         let mut exec = self.begin(address, account)?;
-        let info = exec.run_ordinary_transaction(is_external, msg_root.clone())?;
+        let info = exec.run_ordinary_transaction(is_external, msg_root.clone(), inspector)?;
 
         UncommitedTransaction::with_info(exec, state, Some(msg_root), info).map_err(TxError::Fatal)
     }
 
+    #[inline]
     pub fn begin_tick_tock<'s>(
         &self,
         address: &StdAddr,
         kind: TickTock,
         state: &'s ShardAccount,
     ) -> TxResult<UncommitedTransaction<'a, 's>> {
+        self.begin_tick_tock_ext(address, kind, state, None)
+    }
+
+    pub fn begin_tick_tock_ext<'s>(
+        &self,
+        address: &StdAddr,
+        kind: TickTock,
+        state: &'s ShardAccount,
+        inspector: Option<&mut ExecutorInspector<'_>>,
+    ) -> TxResult<UncommitedTransaction<'a, 's>> {
         let account = state.load_account()?;
         let mut exec = self.begin(address, account)?;
-        let info = exec.run_tick_tock_transaction(kind)?;
+        let info = exec.run_tick_tock_transaction(kind, inspector)?;
 
         UncommitedTransaction::with_info(exec, state, None, info).map_err(TxError::Fatal)
     }
@@ -165,6 +191,15 @@ impl<'a> Executor<'a> {
             cached_storage_stat: None,
         })
     }
+}
+
+/// Executor internals inspector.
+#[derive(Default)]
+pub struct ExecutorInspector<'e> {
+    /// Actions list from compute phase.
+    pub actions: Option<Cell>,
+    /// Debug output target.
+    pub debug: Option<&'e mut dyn std::fmt::Write>,
 }
 
 /// Shared state for executor phases.

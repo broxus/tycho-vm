@@ -13,10 +13,10 @@ use crate::util::{
     check_state_limits_diff, new_varuint24_truncate, new_varuint56_truncate, unlikely,
     StateLimitsResult,
 };
-use crate::ExecutorState;
+use crate::{ExecutorInspector, ExecutorState};
 
 /// Compute phase input context.
-pub struct ComputePhaseContext<'a> {
+pub struct ComputePhaseContext<'a, 'e> {
     /// Parsed transaction input.
     pub input: TransactionInput<'a>,
     /// Fees collected during the storage phase.
@@ -25,6 +25,8 @@ pub struct ComputePhaseContext<'a> {
     ///
     /// Should only be used as part of the `run_local` stuff.
     pub force_accept: bool,
+    /// Executor inspector.
+    pub inspector: Option<&'a mut ExecutorInspector<'e>>,
 }
 
 /// Parsed transaction input.
@@ -88,7 +90,7 @@ impl ExecutorState<'_> {
     ///
     /// [`Uninit`]: AccountState::Uninit
     /// [`Frozen`]: AccountState::Frozen
-    pub fn compute_phase(&mut self, ctx: ComputePhaseContext<'_>) -> Result<ComputePhaseFull> {
+    pub fn compute_phase(&mut self, ctx: ComputePhaseContext<'_, '_>) -> Result<ComputePhaseFull> {
         let is_masterchain = self.address.is_masterchain();
 
         // Compute original balance for the action phase.
@@ -242,7 +244,7 @@ impl ExecutorState<'_> {
             }
         }
 
-        // Run vm.
+        // Build VM stack and register info.
         let stack = self.prepare_vm_stack(ctx.input);
 
         let code = res.new_state.code.clone();
@@ -275,6 +277,16 @@ impl ExecutorState<'_> {
             .with_modifiers(self.params.vm_modifiers)
             .build();
 
+        // Connect inspected output as debug.
+        let mut inspector_actions = None;
+        if let Some(inspector) = ctx.inspector {
+            inspector_actions = Some(&mut inspector.actions);
+            if let Some(debug) = inspector.debug.as_deref_mut() {
+                vm.debug = Some(debug);
+            }
+        }
+
+        // Run VM.
         let exit_code = !vm.run();
 
         // Parse VM state.
@@ -306,6 +318,11 @@ impl ExecutorState<'_> {
             if res.accepted {
                 res.new_state.data = Some(commited.c4);
                 res.actions = commited.c5;
+
+                // Set inspector actions.
+                if let Some(actions) = inspector_actions {
+                    *actions = Some(res.actions.clone());
+                }
             }
         }
 
@@ -448,6 +465,7 @@ mod tests {
             input: TransactionInput::Ordinary(&msg),
             storage_fee: Tokens::ZERO,
             force_accept: false,
+            inspector: None,
         })?;
 
         // Original balance must be correct.
@@ -499,6 +517,7 @@ mod tests {
             input: TransactionInput::Ordinary(&msg),
             storage_fee: Tokens::ZERO,
             force_accept: false,
+            inspector: None,
         })?;
 
         // Original balance must be correct.
@@ -543,6 +562,7 @@ mod tests {
             input: TransactionInput::Ordinary(&msg),
             storage_fee: Tokens::ZERO,
             force_accept: false,
+            inspector: None,
         })?;
 
         // Original balance must be correct.
@@ -604,6 +624,7 @@ mod tests {
             input: TransactionInput::Ordinary(&msg),
             storage_fee: Tokens::ZERO,
             force_accept: false,
+            inspector: None,
         })?;
 
         // Original balance must be correct.
@@ -676,6 +697,7 @@ mod tests {
             input: TransactionInput::Ordinary(&msg),
             storage_fee: Tokens::ZERO,
             force_accept: false,
+            inspector: None,
         })?;
 
         // Original balance must be correct.
@@ -739,6 +761,7 @@ mod tests {
             input: TransactionInput::Ordinary(&msg),
             storage_fee: Tokens::ZERO,
             force_accept: false,
+            inspector: None,
         })?;
 
         // Original balance must be correct.
@@ -805,6 +828,7 @@ mod tests {
             input: TransactionInput::Ordinary(&msg),
             storage_fee: Tokens::ZERO,
             force_accept: false,
+            inspector: None,
         })?;
 
         // Original balance must be correct.
@@ -873,6 +897,7 @@ mod tests {
             input: TransactionInput::Ordinary(&msg),
             storage_fee: Tokens::ZERO,
             force_accept: false,
+            inspector: None,
         })?;
 
         // Original balance must be correct.
@@ -926,6 +951,7 @@ mod tests {
             input: TransactionInput::Ordinary(&msg),
             storage_fee: Tokens::ZERO,
             force_accept: false,
+            inspector: None,
         })?;
 
         // Original balance must be correct.
@@ -976,6 +1002,7 @@ mod tests {
             input: TransactionInput::Ordinary(&msg),
             storage_fee: Tokens::ZERO,
             force_accept: false,
+            inspector: None,
         })?;
 
         // Original balance must be correct.
@@ -1045,6 +1072,7 @@ mod tests {
             input: TransactionInput::Ordinary(&msg),
             storage_fee: Tokens::ZERO,
             force_accept: false,
+            inspector: None,
         })?;
 
         // Original balance must be correct.
@@ -1113,6 +1141,7 @@ mod tests {
             input: TransactionInput::Ordinary(&msg),
             storage_fee: Tokens::ZERO,
             force_accept: false,
+            inspector: None,
         })?;
 
         // Original balance must be correct.
@@ -1182,6 +1211,7 @@ mod tests {
             input: TransactionInput::Ordinary(&msg),
             storage_fee: Tokens::ZERO,
             force_accept: false,
+            inspector: None,
         })?;
 
         // Original balance must be correct.
@@ -1247,6 +1277,7 @@ mod tests {
             input: TransactionInput::Ordinary(&msg),
             storage_fee: Tokens::ZERO,
             force_accept: false,
+            inspector: None,
         })?;
 
         // Original balance must be correct.
@@ -1299,6 +1330,7 @@ mod tests {
             input: TransactionInput::Ordinary(&msg),
             storage_fee: Tokens::ZERO,
             force_accept: false,
+            inspector: None,
         })?;
 
         // Original balance must be correct.
@@ -1356,6 +1388,7 @@ mod tests {
             input: TransactionInput::Ordinary(&msg),
             storage_fee: Tokens::ZERO,
             force_accept: false,
+            inspector: None,
         })?;
 
         // Original balance must be correct.
@@ -1412,6 +1445,7 @@ mod tests {
             input: TransactionInput::Ordinary(&msg),
             storage_fee: Tokens::ZERO,
             force_accept: false,
+            inspector: None,
         })?;
 
         // Original balance must be correct.
@@ -1462,6 +1496,7 @@ mod tests {
             input: TransactionInput::TickTock(TickTock::Tick),
             storage_fee: Tokens::ZERO,
             force_accept: false,
+            inspector: None,
         })?;
 
         // Original balance must be correct.
@@ -1537,6 +1572,7 @@ mod tests {
             input: TransactionInput::TickTock(TickTock::Tick),
             storage_fee: Tokens::ZERO,
             force_accept: false,
+            inspector: None,
         })?;
 
         // Original balance must be correct.
@@ -1673,6 +1709,7 @@ mod tests {
             input: TransactionInput::Ordinary(&msg),
             storage_fee: Tokens::ZERO,
             force_accept: false,
+            inspector: None,
         })?;
 
         // Original balance must be correct.
