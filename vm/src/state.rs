@@ -247,13 +247,38 @@ impl<'a> VmState<'a> {
         )
     )]
     pub fn step(&mut self) -> VmResult<i32> {
+        #[cfg(feature = "tracing")]
+        if self
+            .modifiers
+            .log_mask
+            .intersects(VmLogMask::DUMP_STACK.union(VmLogMask::DUMP_STACK_VERBOSE))
+        {
+            vm_log_stack!(
+                self.stack,
+                self.modifiers
+                    .log_mask
+                    .contains(VmLogMask::DUMP_STACK_VERBOSE)
+            );
+        }
+
         self.steps += 1;
         if !self.code.range().is_data_empty() {
+            #[cfg(feature = "tracing")]
+            if self.modifiers.log_mask.contains(VmLogMask::EXEC_LOCATION) {
+                let Size { bits, refs } = self.code.range().offset();
+                vm_log_exec_location!(self.code.cell(), bits, refs);
+            }
+
             self.cp.dispatch(self)
         } else if !self.code.range().is_refs_empty() {
             vm_log_op!("implicit JMPREF");
 
             let next_cell = self.code.apply().get_reference_cloned(0)?;
+
+            #[cfg(feature = "tracing")]
+            if self.modifiers.log_mask.contains(VmLogMask::EXEC_LOCATION) {
+                vm_log_exec_location!(next_cell, 0u16, 0u8);
+            }
 
             self.gas.try_consume_implicit_jmpref_gas()?;
             let code = self.gas.load_cell_as_slice(next_cell, LoadMode::Full)?;
@@ -276,7 +301,14 @@ impl<'a> VmState<'a> {
 
         let mut res = 0;
         while res == 0 {
-            res = match self.step() {
+            let step_res = self.step();
+
+            #[cfg(feature = "tracing")]
+            if self.modifiers.log_mask.contains(VmLogMask::GAS_REMAINING) {
+                vm_log_gas_remaining!(self.gas.remaining());
+            }
+
+            res = match step_res {
                 Ok(res) => res,
                 Err(e) if e.is_out_of_gas() => {
                     self.steps += 1;
@@ -284,7 +316,7 @@ impl<'a> VmState<'a> {
                 }
                 Err(e) => {
                     let exception = e.as_exception();
-                    vm_log_trace!(e = ?exception, "handling exception: {e:?}");
+                    vm_log_trace!("handling exception {exception:?}: {e:?}");
 
                     self.steps += 1;
                     match self.throw_exception(exception as i32) {
@@ -294,7 +326,7 @@ impl<'a> VmState<'a> {
                             self.throw_out_of_gas()
                         }
                         Err(e) => {
-                            vm_log_trace!(e = ?exception, "double exception: {e:?}");
+                            vm_log_trace!("double exception {exception:?}: {e:?}");
                             return exception.as_exit_code();
                         }
                     }
@@ -309,6 +341,13 @@ impl<'a> VmState<'a> {
                 items: vec![Stack::make_zero()],
             });
             return VmException::CellOverflow.as_exit_code();
+        }
+
+        #[cfg(feature = "tracing")]
+        if self.modifiers.log_mask.contains(VmLogMask::DUMP_C5) {
+            if let Some(commited) = &self.commited_state {
+                vm_log_c5!(commited.c5.as_ref());
+            }
         }
 
         res
@@ -474,7 +513,10 @@ impl<'a> VmState<'a> {
 
     pub fn throw_out_of_gas(&mut self) -> i32 {
         let consumed = self.gas.consumed();
-        vm_log_trace!(consumed, limit = self.gas.limit(), "out of gas");
+        vm_log_trace!(
+            "out of gas: consumed={consumed}, limit={}",
+            self.gas.limit(),
+        );
         self.stack = SafeRc::new(Stack {
             items: vec![SafeRc::new_dyn_value(BigInt::from(consumed))],
         });
@@ -853,6 +895,24 @@ pub struct BehaviourModifiers {
     pub stop_on_accept: bool,
     pub chksig_always_succeed: bool,
     pub signature_with_id: Option<i32>,
+    #[cfg(feature = "tracing")]
+    pub log_mask: VmLogMask,
+}
+
+#[cfg(feature = "tracing")]
+bitflags! {
+    /// VM parts to log.
+    #[derive(Default, Debug, Clone, Copy, Eq, PartialEq)]
+    pub struct VmLogMask: u8 {
+        const MESSAGE = 1 << 0;
+        const DUMP_STACK = 1 << 1;
+        const EXEC_LOCATION = 1 << 2;
+        const GAS_REMAINING = 1 << 3;
+        const DUMP_STACK_VERBOSE = 1 << 4;
+        const DUMP_C5 = 32;
+
+        const FULL = 0b11111;
+    }
 }
 
 /// Execution effects.

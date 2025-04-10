@@ -358,6 +358,10 @@ impl<'l> GasConsumer<'l> {
         self.gas_base.get() - self.gas_remaining.get()
     }
 
+    pub fn remaining(&self) -> u64 {
+        self.gas_remaining.get()
+    }
+
     pub fn base(&self) -> u64 {
         self.gas_base.get()
     }
@@ -368,7 +372,7 @@ impl<'l> GasConsumer<'l> {
 
     pub fn set_limit(&self, limit: u64) {
         let limit = std::cmp::min(limit, self.gas_max);
-        vm_log_trace!(limit, "changing gas limit");
+        vm_log_trace!("changing gas limit: new_limit={limit}");
 
         self.gas_credit.set(0);
         self.gas_limit.set(limit);

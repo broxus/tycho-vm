@@ -161,6 +161,25 @@ impl Stack {
         self.items.len()
     }
 
+    pub fn display_dump(&self, verbose: bool) -> impl std::fmt::Display + '_ {
+        struct DisplayStack<'a> {
+            items: &'a Vec<RcStackValue>,
+            #[allow(unused)]
+            verbose: bool,
+        }
+
+        impl std::fmt::Display for DisplayStack<'_> {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                (self.items as &dyn StackValue).display_list().fmt(f)
+            }
+        }
+
+        DisplayStack {
+            items: &self.items,
+            verbose,
+        }
+    }
+
     /// Reserves capacity for at least `additional` more elements to be inserted.
     pub fn reserve(&mut self, additional: usize) {
         self.items.reserve(additional);

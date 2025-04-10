@@ -1967,7 +1967,7 @@ mod tests {
                 PUSHINT 7
                 REPEATEND
 
-                PUSHINT 1
+                DEPTH
                 DUMPSTK
             }
             CALLXARGS 0, 0

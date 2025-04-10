@@ -53,4 +53,5 @@ everscale-types = { workspace = true, default-features = false, features = [
 everscale-asm-macros = { workspace = true }
 
 [features]
+tracing = ["dep:tracing", "everscale-types/base64"]
 arbitrary = ["dep:arbitrary", "everscale-types/arbitrary", "num-bigint/arbitrary"]

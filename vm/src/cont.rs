@@ -528,7 +528,7 @@ impl Cont for ExcQuitCont {
         let n = SafeRc::make_mut(&mut state.stack)
             .pop_smallint_range(0, 0xffff)
             .unwrap_or_else(|e| e.as_exception() as u32);
-        vm_log_trace!(n, "terminating vm in the default exception handler");
+        vm_log_trace!("terminating vm in the default exception handler: n={n}");
         *exit_code = !(n as i32);
         Ok(None)
     }

@@ -13,31 +13,6 @@ macro_rules! ok {
     };
 }
 
-#[cfg(feature = "tracing")]
-macro_rules! vm_log_op {
-    ($($tt:tt)*) => { $crate::__log_op(format_args!($($tt)*)) };
-}
-
-#[cfg(feature = "tracing")]
-fn __log_op(args: std::fmt::Arguments<'_>) {
-    tracing::trace!("execute {args}");
-}
-
-#[cfg(feature = "tracing")]
-macro_rules! vm_log_trace {
-    ($($tt:tt)*) => { tracing::trace!($($tt)*) };
-}
-
-#[cfg(not(feature = "tracing"))]
-macro_rules! vm_log_op {
-    ($($tt:tt)*) => {{}};
-}
-
-#[cfg(not(feature = "tracing"))]
-macro_rules! vm_log_trace {
-    ($($tt:tt)*) => {{}};
-}
-
 macro_rules! vm_ensure {
     ($cond:expr, $($tt:tt)+) => {
         if $crate::__private::not($cond) {
@@ -197,11 +172,16 @@ pub use self::smc_info::{
 pub use self::stack::{
     NaN, RcStackValue, Stack, StackValue, StackValueType, StaticStackValue, Tuple, TupleExt,
 };
+#[cfg(feature = "tracing")]
+pub use self::state::VmLogMask;
 pub use self::state::{
     BehaviourModifiers, CommitedState, InitSelectorParams, IntoCode, SaveCr, VmState,
     VmStateBuilder,
 };
 pub use self::util::OwnedCellSlice;
+
+#[macro_use]
+mod log;
 
 mod cont;
 mod dispatch;

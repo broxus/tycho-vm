@@ -24,7 +24,7 @@ impl DebugOps {
             depth = 255;
         }
 
-        for value in st.stack.items.iter().rev().take(depth) {
+        for value in st.stack.items.iter().rev().take(depth).rev() {
             write!(&mut *debug, " {}", value.display_list()).unwrap();
         }
 
