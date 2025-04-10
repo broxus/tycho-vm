@@ -504,7 +504,7 @@ impl<'a> Load<'a> for Stack {
         result.items.push(ok!(Self::load_stack_value(slice)));
 
         if depth > 1 {
-            for _ in 0..depth - 2 {
+            for _ in 0..depth - 1 {
                 let slice = &mut ok!(rest.as_slice());
                 rest = ok!(slice.load_reference());
                 result.items.push(ok!(Self::load_stack_value(slice)));
@@ -1438,6 +1438,16 @@ impl_safe_delete! {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn parse_stack_tuple() {
+        let cell =
+            Boc::decode_base64("te6cckEBAwEAHQABGAAAAgEAAAAAAAAAAgEBEgEAAAAAAAAAAQIAAHap0w8=")
+                .unwrap();
+
+        let stack = cell.parse::<Stack>().unwrap();
+        println!("{:#?}", stack.items);
+    }
 
     #[test]
     fn stack_store_load_works() {
