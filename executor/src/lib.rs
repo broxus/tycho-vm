@@ -198,6 +198,8 @@ impl<'a> Executor<'a> {
 pub struct ExecutorInspector<'e> {
     /// Actions list from compute phase.
     pub actions: Option<Cell>,
+    /// Compute phase exit code.
+    pub exit_code: Option<i32>,
     /// Debug output target.
     pub debug: Option<&'e mut dyn std::fmt::Write>,
 }

@@ -279,8 +279,10 @@ impl ExecutorState<'_> {
 
         // Connect inspected output as debug.
         let mut inspector_actions = None;
+        let mut inspector_exit_code = None;
         if let Some(inspector) = ctx.inspector {
             inspector_actions = Some(&mut inspector.actions);
+            inspector_exit_code = Some(&mut inspector.exit_code);
             if let Some(debug) = inspector.debug.as_deref_mut() {
                 vm.debug = Some(debug);
             }
@@ -288,6 +290,10 @@ impl ExecutorState<'_> {
 
         // Run VM.
         let exit_code = !vm.run();
+
+        if let Some(inspector_exit_code) = inspector_exit_code {
+            *inspector_exit_code = Some(exit_code);
+        }
 
         // Parse VM state.
         res.accepted = ctx.force_accept || vm.gas.credit() == 0;
