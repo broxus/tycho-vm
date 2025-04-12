@@ -938,7 +938,7 @@ impl StackValue for Cell {
     }
 
     fn fmt_dump(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "C{{{}}}", self.repr_hash())
+        write!(f, "C{{{:X}}}", self.repr_hash())
     }
 
     fn as_cell(&self) -> Option<&Cell> {

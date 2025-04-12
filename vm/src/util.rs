@@ -51,18 +51,14 @@ impl OwnedCellSlice {
 
 impl std::fmt::Display for OwnedCellSlice {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let (range, cell) = &self.0;
-        let bits_end = range.offset_bits() + range.size_bits();
-        let refs_end = range.offset_refs() + range.size_refs();
-        write!(
-            f,
-            "CS{{Cell {{{}}} bits: {}..{}; refs: {}..{}}}",
-            cell.repr_hash(),
-            range.offset_bits(),
-            bits_end,
-            range.offset_refs(),
-            refs_end
-        )
+        let cs = CellSlice::apply_allow_exotic(&self.0);
+        ok!(write!(f, "x{:X}", cs.display_data()));
+        let refs = cs.size_refs();
+        if refs != 0 {
+            write!(f, ",{refs}")
+        } else {
+            Ok(())
+        }
     }
 }
 

@@ -321,6 +321,8 @@ pub trait Cont: Store + SafeDelete + dyn_clone::DynClone + std::fmt::Debug {
 
     fn as_stack_value(&self) -> &dyn StackValue;
 
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result;
+
     fn jump(self: Rc<Self>, state: &mut VmState, exit_code: &mut i32) -> VmResult<Option<RcCont>>;
 
     fn get_control_data(&self) -> Option<&ControlData> {
@@ -352,7 +354,9 @@ impl<T: Cont + 'static> StackValue for T {
     }
 
     fn fmt_dump(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "Cont{{{:?}}}", self as *const _ as *const ())
+        ok!(f.write_str("Cont{{"));
+        ok!(<T as Cont>::fmt(self, f));
+        f.write_str("}}")
     }
 
     fn as_cont(&self) -> Option<&dyn Cont> {
@@ -466,6 +470,11 @@ impl Cont for QuitCont {
         self
     }
 
+    #[inline]
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("vmc_quit")
+    }
+
     #[cfg_attr(
         feature = "tracing",
         instrument(level = "trace", name = "quit_cont", skip_all)
@@ -518,6 +527,11 @@ impl Cont for ExcQuitCont {
 
     fn as_stack_value(&self) -> &dyn StackValue {
         self
+    }
+
+    #[inline]
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("vmc_quit_exc")
     }
 
     #[cfg_attr(
@@ -577,6 +591,11 @@ impl Cont for PushIntCont {
 
     fn as_stack_value(&self) -> &dyn StackValue {
         self
+    }
+
+    #[inline]
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("vmc_pushint")
     }
 
     #[cfg_attr(
@@ -651,6 +670,11 @@ impl Cont for RepeatCont {
 
     fn as_stack_value(&self) -> &dyn StackValue {
         self
+    }
+
+    #[inline]
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("vmc_repeat")
     }
 
     #[cfg_attr(
@@ -747,6 +771,11 @@ impl Cont for AgainCont {
         self
     }
 
+    #[inline]
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("vmc_again")
+    }
+
     #[cfg_attr(
         feature = "tracing",
         instrument(level = "trace", name = "again_cont", skip_all)
@@ -808,6 +837,11 @@ impl Cont for UntilCont {
 
     fn as_stack_value(&self) -> &dyn StackValue {
         self
+    }
+
+    #[inline]
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("vmc_until")
     }
 
     #[cfg_attr(
@@ -881,6 +915,15 @@ impl Cont for WhileCont {
 
     fn as_stack_value(&self) -> &dyn StackValue {
         self
+    }
+
+    #[inline]
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(if self.check_cond {
+            "vmc_while_cond"
+        } else {
+            "vmc_while_body"
+        })
     }
 
     #[cfg_attr(
@@ -981,6 +1024,11 @@ impl Cont for ArgContExt {
         self
     }
 
+    #[inline]
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("vmc_envelope")
+    }
+
     #[cfg_attr(
         feature = "tracing",
         instrument(level = "trace", name = "arg_cont", skip_all)
@@ -1066,6 +1114,11 @@ impl Cont for OrdCont {
 
     fn as_stack_value(&self) -> &dyn StackValue {
         self
+    }
+
+    #[inline]
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("vmc_std")
     }
 
     #[cfg_attr(
