@@ -64,7 +64,7 @@ impl DictOps {
         let mut cs = csr.apply();
         let dict_cs = cs.load_prefix(1, cs.get_bit(0)? as u8)?;
 
-        ok!(stack.push(OwnedCellSlice::from((csr.cell().clone(), dict_cs.range()))));
+        ok!(stack.push(OwnedCellSlice::from((dict_cs.range(), csr.cell().clone()))));
         if !preload {
             let range = cs.range();
             SafeRc::make_mut(&mut csr).set_range(range);
@@ -625,7 +625,7 @@ impl DictOps {
 
         vm_log_op!(
             "DICTPUSHCONST {n} ({})",
-            OwnedCellSlice::from((st.code.cell().clone(), slice_range))
+            OwnedCellSlice::from((slice_range, st.code.cell().clone()))
         );
         ok!(stack.push(dict));
         ok!(stack.push_int(n));

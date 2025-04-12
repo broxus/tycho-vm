@@ -65,7 +65,7 @@ impl CurrencyOps {
         match skip_message_addr(&mut cs) {
             Ok(()) => {
                 addr.skip_last(cs.size_bits(), cs.size_refs())?;
-                let addr_cs = OwnedCellSlice::from((csr.cell().clone(), addr.range()));
+                let addr_cs = OwnedCellSlice::from((addr.range(), csr.cell().clone()));
 
                 let range = cs.range();
                 SafeRc::make_mut(&mut csr).set_range(range);
@@ -225,7 +225,7 @@ fn parse_message_addr(cell: &Cell, range: &mut CellSliceRange) -> Result<AddrPar
             let addr = cs.load_prefix(len, 0)?;
 
             Ok(AddrParts::Ext {
-                addr: OwnedCellSlice::from((cell.clone(), addr.range())),
+                addr: OwnedCellSlice::from((addr.range(), cell.clone())),
             })
         }
         // addr_std$10
@@ -240,7 +240,7 @@ fn parse_message_addr(cell: &Cell, range: &mut CellSliceRange) -> Result<AddrPar
             Ok(AddrParts::Std {
                 pfx,
                 workchain,
-                addr: OwnedCellSlice::from((cell.clone(), addr.range())),
+                addr: OwnedCellSlice::from((addr.range(), cell.clone())),
             })
         }
         // addr_var$11
@@ -257,7 +257,7 @@ fn parse_message_addr(cell: &Cell, range: &mut CellSliceRange) -> Result<AddrPar
             Ok(AddrParts::Var {
                 pfx,
                 workchain,
-                addr: OwnedCellSlice::from((cell.clone(), addr.range())),
+                addr: OwnedCellSlice::from((addr.range(), cell.clone())),
             })
         }
         _ => Err(Error::InvalidData),
@@ -275,7 +275,7 @@ fn parse_maybe_anycast(
         // rewrite_pfx:(bits depth) = Anycast;
         let pfx = cs.load_prefix(depth.into_bit_len(), 0)?;
 
-        Some(OwnedCellSlice::from((cell.clone(), pfx.range())))
+        Some(OwnedCellSlice::from((pfx.range(), cell.clone())))
     } else {
         None
     })

@@ -404,7 +404,7 @@ impl SmcInfoTonV6 {
             let value = value?;
 
             // First 32 bits of value is unix timestamp.
-            let utime_since = value.1.apply_allow_exotic(&value.0).load_u32()?;
+            let utime_since = value.0.apply_allow_exotic(&value.1).load_u32()?;
             if now < utime_since {
                 continue;
             }

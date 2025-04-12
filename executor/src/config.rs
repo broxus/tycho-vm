@@ -265,7 +265,7 @@ fn parse_storage_prices(
     let mut latest_storage_prices = None;
     for value in storage_prices_dict.values_owned() {
         let value = value?;
-        let prices = StoragePrices::load_from(&mut value.1.apply_allow_exotic(&value.0))?;
+        let prices = StoragePrices::load_from(&mut value.0.apply_allow_exotic(&value.1))?;
         if prices.utime_since <= now {
             latest_storage_prices = Some(value);
         }

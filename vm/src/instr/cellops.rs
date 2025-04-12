@@ -80,7 +80,7 @@ impl CellOps {
 
         code_range.skip_first(data_bits, refs).ok();
 
-        let code = OwnedCellSlice::from((st.code.cell().clone(), slice_range));
+        let code = OwnedCellSlice::from((slice_range, st.code.cell().clone()));
         vm_log_op!("PUSHCONT {}", code);
 
         let cont = SafeRc::new(OrdCont::simple(code, st.cp.id()));
@@ -100,7 +100,7 @@ impl CellOps {
 
         code_range.skip_first(data_bits, 0).ok();
 
-        let code = OwnedCellSlice::from((st.code.cell().clone(), slice_range));
+        let code = OwnedCellSlice::from((slice_range, st.code.cell().clone()));
         vm_log_op!("PUSHCONT {}", code);
 
         let cont = SafeRc::new(OrdCont::simple(code, st.cp.id()));
@@ -635,7 +635,7 @@ impl CellOps {
 
         vm_log_op!(
             "STSLICECONST {}",
-            OwnedCellSlice::from((st.code.cell().clone(), slice_range))
+            OwnedCellSlice::from((slice_range, st.code.cell().clone()))
         );
 
         let stack = SafeRc::make_mut(&mut st.stack);
@@ -892,7 +892,7 @@ impl CellOps {
         vm_log_op!(
             "SDBEGINS{} {}",
             if quiet { "Q" } else { "" },
-            OwnedCellSlice::from((st.code.cell().clone(), slice_range))
+            OwnedCellSlice::from((slice_range, st.code.cell().clone()))
         );
 
         let stack = SafeRc::make_mut(&mut st.stack);
@@ -976,7 +976,7 @@ impl CellOps {
         let ok = range.skip_first(bits, refs).is_ok();
         debug_assert!(ok);
 
-        ok!(stack.push(OwnedCellSlice::from((cs.cell().clone(), prefix_range))));
+        ok!(stack.push(OwnedCellSlice::from((prefix_range, cs.cell().clone()))));
 
         SafeRc::make_mut(&mut cs).set_range(range);
         ok!(stack.push_raw(cs));
@@ -1338,7 +1338,7 @@ fn exec_push_slice_common(st: &mut VmState, bits: u16, data_bits: u16, refs: u8)
         slice_range = slice.range();
     }
 
-    let slice = SafeRc::new_dyn_value(OwnedCellSlice::from((st.code.cell().clone(), slice_range)));
+    let slice = SafeRc::new_dyn_value(OwnedCellSlice::from((slice_range, st.code.cell().clone())));
     vm_log_op!("PUSHSLICE {}", slice.display_list());
 
     ok!(SafeRc::make_mut(&mut st.stack).push_raw(slice));
@@ -1720,7 +1720,7 @@ fn exec_load_slice_common(stack: &mut Stack, bits: u16, args: LoadSliceArgs) -> 
 
     let range = {
         let mut range = cs.range();
-        let slice = OwnedCellSlice::from((cs.cell().clone(), range.get_prefix(bits, 0)));
+        let slice = OwnedCellSlice::from((range.get_prefix(bits, 0), cs.cell().clone()));
         ok!(stack.push(slice));
 
         let ok = range.skip_first(bits, 0).is_ok();

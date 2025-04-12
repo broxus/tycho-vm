@@ -1892,7 +1892,7 @@ mod tests {
                 body_to_cell: true,
             })
         );
-        assert_eq!(msg.body.0, msg_body.build()?);
+        assert_eq!(msg.body.1, msg_body.build()?);
 
         let MsgInfo::Int(info) = msg.info else {
             panic!("expected an internal message");

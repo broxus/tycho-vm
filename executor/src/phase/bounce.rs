@@ -53,11 +53,11 @@ impl ExecutorState<'_> {
 
         // Compute additional full body cell.
         let full_body = if self.params.full_body_in_bounced {
-            let (cell, range) = &ctx.received_message.body;
-            Some(if range.is_full(cell.as_ref()) {
+            let (range, cell) = &ctx.received_message.body;
+            Some(if range.is_full(cell) {
                 cell.clone()
             } else {
-                CellBuilder::build_from(range.apply_allow_exotic(cell.as_ref()))?
+                CellBuilder::build_from(range.apply_allow_exotic(cell))?
             })
         } else {
             None
@@ -156,10 +156,8 @@ impl ExecutorState<'_> {
             const BOUNCE_SELECTOR: u32 = u32::MAX;
 
             let body_prefix = {
-                let (cell, range) = &ctx.received_message.body;
-                range
-                    .apply_allow_exotic(cell.as_ref())
-                    .get_prefix(ROOT_BODY_BITS, 0)
+                let (range, cell) = &ctx.received_message.body;
+                range.apply_allow_exotic(cell).get_prefix(ROOT_BODY_BITS, 0)
             };
 
             let c = Cell::empty_context();
@@ -213,10 +211,6 @@ mod tests {
 
     use super::*;
     use crate::tests::{make_default_config, make_default_params, make_message};
-
-    fn apply_cs((cell, range): &CellSliceParts) -> CellSlice<'_> {
-        range.apply_allow_exotic(cell)
-    }
 
     #[test]
     fn bounce_with_enough_funds() {
@@ -279,8 +273,14 @@ mod tests {
         assert_eq!(state.out_msgs.len(), 1);
         let bounced_msg = state.out_msgs.last().unwrap().load().unwrap();
         assert!(bounced_msg.init.is_none());
-        assert_eq!(bounced_msg.body.1.size_bits(), 32);
-        assert_eq!(apply_cs(&bounced_msg.body).load_u32().unwrap(), u32::MAX);
+        assert_eq!(bounced_msg.body.0.size_bits(), 32);
+        assert_eq!(
+            CellSlice::apply(&bounced_msg.body)
+                .unwrap()
+                .load_u32()
+                .unwrap(),
+            u32::MAX
+        );
 
         let MsgInfo::Int(bounced_msg_info) = bounced_msg.info else {
             panic!("expected bounced internal message");

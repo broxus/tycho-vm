@@ -12,9 +12,9 @@ use num_traits::{ToPrimitive, Zero};
 pub struct OwnedCellSlice(CellSliceParts);
 
 impl OwnedCellSlice {
+    #[inline]
     pub fn new_allow_exotic(cell: Cell) -> Self {
-        let range = CellSliceRange::full(cell.as_ref());
-        Self((cell, range))
+        Self(CellSliceParts::from(cell))
     }
 
     pub fn apply(&self) -> CellSlice<'_> {
@@ -23,22 +23,22 @@ impl OwnedCellSlice {
 
     #[inline]
     pub fn range(&self) -> CellSliceRange {
-        self.0 .1
+        self.0 .0
     }
 
     #[inline]
     pub fn range_mut(&mut self) -> &mut CellSliceRange {
-        &mut self.0 .1
+        &mut self.0 .0
     }
 
     #[inline]
     pub fn cell(&self) -> &Cell {
-        &self.0 .0
+        &self.0 .1
     }
 
     #[inline]
     pub fn set_range(&mut self, range: CellSliceRange) {
-        self.0 .1 = range
+        self.0 .0 = range
     }
 
     pub fn fits_into(&self, builder: &CellBuilder) -> bool {
@@ -51,7 +51,7 @@ impl OwnedCellSlice {
 
 impl std::fmt::Display for OwnedCellSlice {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let (cell, range) = &self.0;
+        let (range, cell) = &self.0;
         let bits_end = range.offset_bits() + range.size_bits();
         let refs_end = range.offset_refs() + range.size_refs();
         write!(

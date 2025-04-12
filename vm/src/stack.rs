@@ -1371,7 +1371,7 @@ pub(crate) fn load_slice_as_stack_value(slice: &mut CellSlice) -> Result<OwnedCe
     let ok = range.only_first(bits, refs).is_ok();
     debug_assert!(ok);
 
-    Ok(OwnedCellSlice::from((cell, range)))
+    Ok(OwnedCellSlice::from((range, cell)))
 }
 
 // === SafeRc ===

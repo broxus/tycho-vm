@@ -136,12 +136,10 @@ impl ExecutorState<'_> {
             let body_cell = slice.load_reference_cloned()?;
             anyhow::ensure!(slice.is_empty(), "message contains extra data");
 
-            let body_range = CellSliceRange::full(body_cell.as_ref());
-            (body_cell, body_range)
+            CellSliceParts::from(body_cell)
         } else {
             // Inline body.
-            let body_range = slice.range();
-            (msg_root.clone(), body_range)
+            (slice.range(), msg_root.clone())
         };
 
         // Handle messages to the blackhole.
@@ -217,10 +215,6 @@ mod tests {
     const OK_BALANCE: Tokens = Tokens::new(10_000_000_000);
     const STUB_ADDR: StdAddr = StdAddr::new(0, HashBytes::ZERO);
 
-    fn apply_cs((cell, range): &CellSliceParts) -> CellSlice<'_> {
-        range.apply_allow_exotic(cell)
-    }
-
     // === Positive ===
 
     #[test]
@@ -253,7 +247,7 @@ mod tests {
             let target_hash = *CellBuilder::build_from(&target).unwrap().repr_hash();
             assert_eq!(init.hash, target_hash);
         }
-        assert!(msg.body.1.is_empty());
+        assert!(msg.body.0.is_empty());
         assert_eq!(msg.balance_remaining, CurrencyCollection::ZERO);
 
         // LT must not change.
@@ -305,7 +299,10 @@ mod tests {
         assert!(!msg.is_external);
         assert!(msg.bounce_enabled);
         assert!(msg.init.is_none());
-        assert_eq!(apply_cs(&msg.body).load_u32().unwrap(), 0xdeafbeaf);
+        assert_eq!(
+            CellSlice::apply(&msg.body).unwrap().load_u32().unwrap(),
+            0xdeafbeaf
+        );
         assert_eq!(msg.balance_remaining, OK_BALANCE.into());
 
         // LT must change to the message LT.
@@ -355,7 +352,7 @@ mod tests {
         assert!(!msg.is_external);
         assert!(msg.bounce_enabled);
         assert!(msg.init.is_none());
-        assert!(msg.body.1.is_empty());
+        assert!(msg.body.0.is_empty());
         assert_eq!(msg.balance_remaining, CurrencyCollection::ZERO);
 
         // LT must change to the message LT.
