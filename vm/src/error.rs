@@ -80,6 +80,22 @@ impl From<Error> for Box<VmError> {
     }
 }
 
+/// Opcode dump result.
+#[cfg(feature = "dump")]
+pub type DumpResult = Result<(), DumpError>;
+
+/// Opcode dump error.
+#[cfg(feature = "dump")]
+#[derive(thiserror::Error, Debug)]
+pub enum DumpError {
+    #[error(transparent)]
+    InvalidCode(#[from] everscale_types::error::Error),
+    #[error("invalid opcode")]
+    InvalidOpcode,
+    #[error(transparent)]
+    WriterError(#[from] std::fmt::Error),
+}
+
 /// A code for an execution error.
 #[derive(Debug, Clone, Copy, Eq, PartialEq, Ord, PartialOrd)]
 #[repr(u8)]

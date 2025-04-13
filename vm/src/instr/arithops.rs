@@ -1,13 +1,17 @@
 use std::cmp::Ordering;
 
-use anyhow::Result;
+#[cfg(feature = "dump")]
+use everscale_types::prelude::*;
 use num_bigint::{BigInt, Sign};
 use num_integer::Integer;
 use num_traits::Zero;
 use tycho_vm_proc::vm_module;
 
-use crate::dispatch::Opcodes;
+#[cfg(feature = "dump")]
+use crate::dispatch::DumpOutput;
 use crate::error::VmResult;
+#[cfg(feature = "dump")]
+use crate::error::{DumpError, DumpResult};
 use crate::saferc::SafeRc;
 use crate::state::VmState;
 use crate::util::load_int_from_slice;
@@ -18,12 +22,6 @@ pub struct ArithOps;
 impl ArithOps {
     // === Int constants ===
 
-    #[init]
-    fn init_int_const_ext(&self, t: &mut Opcodes) -> Result<()> {
-        t.add_ext_range(0x82 << 5, (0x82 << 5) + 31, 13, exec_push_int)?;
-        Ok(())
-    }
-
     #[op(code = "7x", fmt = "PUSHINT {x}", args(x = ((args as i32 + 5) & 0xf) - 5))]
     #[op(code = "80xx", fmt = "PUSHINT {x}", args(x = args as i8 as i32))]
     #[op(code = "81xxxx", fmt = "PUSHINT {x}", args(x = args as i16 as i32))]
@@ -32,6 +30,12 @@ impl ArithOps {
         Ok(0)
     }
 
+    #[op_ext_range(
+        code_min = 0x82 << 5,
+        code_max = (0x82 << 5) + 31,
+        total_bits = 13,
+        dump_with = dump_push_int
+    )]
     fn exec_push_int(st: &mut VmState, args: u32, bits: u16) -> VmResult<i32> {
         let l = (args as u16 & 0b11111) + 2;
         let value_len = 3 + l * 8;
@@ -49,6 +53,25 @@ impl ArithOps {
 
         ok!(SafeRc::make_mut(&mut st.stack).push_int(int));
         Ok(0)
+    }
+
+    #[cfg(feature = "dump")]
+    fn dump_push_int(
+        code: &mut CellSlice<'_>,
+        args: u32,
+        bits: u16,
+        f: &mut dyn DumpOutput,
+    ) -> DumpResult {
+        let l = (args as u16 & 0b11111) + 2;
+        let value_len = 3 + l * 8;
+
+        if !code.has_remaining(bits + value_len, 0) {
+            return Err(DumpError::InvalidOpcode);
+        }
+        code.skip_first(bits, 0)?;
+
+        let int = load_int_from_slice(code, value_len, true)?;
+        f.record_opcode(&format_args!("PUSHINT {int}"))
     }
 
     #[op(code = "83xx @ ..83ff", fmt = "PUSHPOW2 {x}", args(x = (args & 0xff) + 1))]

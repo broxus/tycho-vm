@@ -19,6 +19,22 @@ struct VmInstrArgs {
     cond: Option<syn::Expr>,
 }
 
+#[derive(Debug, FromMeta)]
+struct VmExtInstrArgs {
+    code: syn::Expr,
+    code_bits: syn::Expr,
+    arg_bits: syn::Expr,
+    dump_with: syn::Expr,
+}
+
+#[derive(Debug, FromMeta)]
+struct VmExtRangeInstrArgs {
+    code_min: syn::Expr,
+    code_max: syn::Expr,
+    total_bits: syn::Expr,
+    dump_with: syn::Expr,
+}
+
 #[proc_macro_attribute]
 pub fn vm_module(_: TokenStream, input: TokenStream) -> TokenStream {
     let mut input = syn::parse_macro_input!(input as ItemImpl);
@@ -43,11 +59,19 @@ pub fn vm_module(_: TokenStream, input: TokenStream) -> TokenStream {
         let mut has_init = false;
 
         let mut instr_attrs = Vec::with_capacity(fun.attrs.len());
+        let mut ext_instr_attrs = Vec::new();
+        let mut ext_range_instr_attrs = Vec::new();
         let mut remaining_attr = Vec::new();
         for attr in fun.attrs.drain(..) {
             if let Some(path) = attr.meta.path().get_ident() {
                 if path == "op" {
                     instr_attrs.push(attr);
+                    continue;
+                } else if path == "op_ext" {
+                    ext_instr_attrs.push(attr);
+                    continue;
+                } else if path == "op_ext_range" {
+                    ext_range_instr_attrs.push(attr);
                     continue;
                 } else if path == "init" {
                     has_init = true;
@@ -66,6 +90,20 @@ pub fn vm_module(_: TokenStream, input: TokenStream) -> TokenStream {
         } else {
             for attr in instr_attrs {
                 match process_instr_definition(&fun, &opcodes_arg, &attr, &mut opcodes) {
+                    Ok(definition) => definitions.push(definition),
+                    Err(e) => errors.push(e.with_span(&attr)),
+                }
+            }
+
+            for attr in ext_instr_attrs {
+                match process_ext_instr_definition(&fun, &opcodes_arg, &attr) {
+                    Ok(definition) => definitions.push(definition),
+                    Err(e) => errors.push(e.with_span(&attr)),
+                }
+            }
+
+            for attr in ext_range_instr_attrs {
+                match process_ext_range_instr_definition(&fun, &opcodes_arg, &attr) {
                     Ok(definition) => definitions.push(definition),
                     Err(e) => errors.push(e.with_span(&attr)),
                 }
@@ -361,9 +399,11 @@ fn process_instr_definition(
 
         #[allow(clippy::never_loop)] // fixes clippy false-positive
         for function_arg in function.sig.inputs.iter().skip(1) {
+            let ty;
             let name = 'function_arg: {
                 if let syn::FnArg::Typed(input) = function_arg {
                     if let syn::Pat::Ident(pat) = &*input.pat {
+                        ty = &input.ty;
                         break 'function_arg pat.ident.to_string();
                     }
                 }
@@ -377,7 +417,7 @@ fn process_instr_definition(
                     if opcode_arg.to_string() != name {
                         if let Some(expr) = explicit_arg {
                             let ident = quote::format_ident!("{name}");
-                            arg_definitions.push(quote! { let #ident = #expr; });
+                            arg_definitions.push(quote! { let #ident: #ty = #expr; });
                             arg_idents.push(ident);
                             continue;
                         }
@@ -391,14 +431,14 @@ fn process_instr_definition(
                     shift -= *bits as u32;
                     arg_definitions.push(match explicit_arg {
                         None if *bits == 1 => {
-                            quote! { let #ident = (args >> #shift) & 0b1 != 0; }
+                            quote! { let #ident: #ty = (args >> #shift) & 0b1 != 0; }
                         }
                         None => {
                             let mask = (1u32 << *bits) - 1;
-                            quote! { let #ident = (args >> #shift) & #mask; }
+                            quote! { let #ident: #ty = (args >> #shift) & #mask; }
                         }
                         Some(expr) => {
-                            quote! { let #ident = #expr; }
+                            quote! { let #ident: #ty = #expr; }
                         }
                     });
                     arg_idents.push(ident);
@@ -408,7 +448,7 @@ fn process_instr_definition(
                 None => match explicit_arg {
                     Some(expr) => {
                         let ident = quote::format_ident!("{name}");
-                        arg_definitions.push(quote! { let #ident = #expr; });
+                        arg_definitions.push(quote! { let #ident: #ty = #expr; });
                         arg_idents.push(ident);
                     }
                     None => {
@@ -438,12 +478,28 @@ fn process_instr_definition(
     };
 
     let wrapper_func_name = quote::format_ident!("{function_name}_wrapper");
+
+    #[cfg(feature = "dump")]
+    let dump_func_name = quote::format_ident!("dump_{function_name}");
+    #[cfg(feature = "dump")]
+    let dump_func;
+
     let wrapper_func = match &ty {
         OpcodeTy::Simple { .. } => {
             if let Some(cond) = instr.cond {
                 return Err(
                     Error::custom("Unexpected condition for simple opcode").with_span(&cond)
                 );
+            }
+
+            #[cfg(feature = "dump")]
+            {
+                dump_func = quote! {
+                    fn #dump_func_name(__f: &mut dyn ::tycho_vm::DumpOutput) -> ::tycho_vm::error::DumpResult {
+                        #(#arg_definitions)*
+                        __f.record_opcode(&format_args!(#fmt))
+                    }
+                };
             }
 
             quote! {
@@ -455,9 +511,28 @@ fn process_instr_definition(
             }
         }
         OpcodeTy::Fixed { .. } | OpcodeTy::FixedRange { .. } => {
-            let cond = instr.cond.map(|cond| {
+            let cond = instr.cond.as_ref().map(|cond| {
                 quote! { vm_ensure!(#cond, InvalidOpcode); }
             });
+
+            #[cfg(feature = "dump")]
+            {
+                let dump_cond = instr.cond.map(|cond| {
+                    quote! {
+                        if !#cond {
+                            return Err(::tycho_vm::error::DumpError::InvalidOpcode);
+                        }
+                    }
+                });
+
+                dump_func = quote! {
+                    fn #dump_func_name(args: u32, __f: &mut dyn ::tycho_vm::DumpOutput) -> ::tycho_vm::error::DumpResult {
+                        #(#arg_definitions)*
+                        #dump_cond
+                        __f.record_opcode(&format_args!(#fmt))
+                    }
+                };
+            }
 
             quote! {
                 fn #wrapper_func_name(st: &mut ::tycho_vm::state::VmState, args: u32) -> ::tycho_vm::error::VmResult<i32> {
@@ -471,9 +546,29 @@ fn process_instr_definition(
     };
 
     let expr_add = match ty {
+        #[cfg(feature = "dump")]
+        OpcodeTy::Simple { opcode, bits } => quote! {
+            #opcodes_arg.add_simple(#opcode, #bits, #wrapper_func_name, #dump_func_name)
+        },
+        #[cfg(not(feature = "dump"))]
         OpcodeTy::Simple { opcode, bits } => quote! {
             #opcodes_arg.add_simple(#opcode, #bits, #wrapper_func_name)
         },
+        #[cfg(feature = "dump")]
+        OpcodeTy::Fixed {
+            opcode,
+            opcode_bits,
+            arg_bits,
+        } => quote! {
+            #opcodes_arg.add_fixed(
+                #opcode,
+                #opcode_bits,
+                #arg_bits,
+                #wrapper_func_name,
+                #dump_func_name,
+            )
+        },
+        #[cfg(not(feature = "dump"))]
         OpcodeTy::Fixed {
             opcode,
             opcode_bits,
@@ -481,20 +576,117 @@ fn process_instr_definition(
         } => quote! {
             #opcodes_arg.add_fixed(#opcode, #opcode_bits, #arg_bits, #wrapper_func_name)
         },
+        #[cfg(feature = "dump")]
         OpcodeTy::FixedRange {
             opcode_min,
             opcode_max,
             total_bits,
             arg_bits,
         } => quote! {
-            #opcodes_arg.add_fixed_range(#opcode_min, #opcode_max, #total_bits, #arg_bits, #wrapper_func_name)
+            #opcodes_arg.add_fixed_range(
+                #opcode_min,
+                #opcode_max,
+                #total_bits,
+                #arg_bits,
+                #wrapper_func_name,
+                #dump_func_name,
+            )
+        },
+        #[cfg(not(feature = "dump"))]
+        OpcodeTy::FixedRange {
+            opcode_min,
+            opcode_max,
+            total_bits,
+            arg_bits,
+        } => quote! {
+            #opcodes_arg.add_fixed_range(
+                #opcode_min,
+                #opcode_max,
+                #total_bits,
+                #arg_bits,
+                #wrapper_func_name
+            )
         },
     };
 
-    Ok(syn::parse_quote! {{
-        #wrapper_func
-        #expr_add?;
-    }})
+    #[cfg(feature = "dump")]
+    {
+        Ok(syn::parse_quote! {{
+            #dump_func
+            #wrapper_func
+            #expr_add?;
+        }})
+    }
+
+    #[cfg(not(feature = "dump"))]
+    {
+        Ok(syn::parse_quote! {{
+            #wrapper_func
+            #expr_add?;
+        }})
+    }
+}
+
+fn process_ext_instr_definition(
+    function: &syn::ImplItemFn,
+    opcodes_arg: &syn::Ident,
+    attr: &syn::Attribute,
+) -> Result<syn::Expr, Error> {
+    let VmExtInstrArgs {
+        code,
+        code_bits,
+        arg_bits,
+        dump_with,
+    } = <_>::from_meta(&attr.meta)?;
+
+    let function_name = &function.sig.ident;
+
+    #[cfg(feature = "dump")]
+    {
+        Ok(syn::parse_quote!({
+            #opcodes_arg.add_ext(#code, #code_bits, #arg_bits, #function_name, #dump_with)?;
+        }))
+    }
+
+    #[cfg(not(feature = "dump"))]
+    {
+        _ = dump_with;
+
+        Ok(syn::parse_quote!({
+            #opcodes_arg.add_ext(#code, #code_bits, #arg_bits, #function_name)?;
+        }))
+    }
+}
+
+fn process_ext_range_instr_definition(
+    function: &syn::ImplItemFn,
+    opcodes_arg: &syn::Ident,
+    attr: &syn::Attribute,
+) -> Result<syn::Expr, Error> {
+    let VmExtRangeInstrArgs {
+        code_min,
+        code_max,
+        total_bits,
+        dump_with,
+    } = <_>::from_meta(&attr.meta)?;
+
+    let function_name = &function.sig.ident;
+
+    #[cfg(feature = "dump")]
+    {
+        Ok(syn::parse_quote!({
+            #opcodes_arg.add_ext_range(#code_min, #code_max, #total_bits, #function_name, #dump_with)?;
+        }))
+    }
+
+    #[cfg(not(feature = "dump"))]
+    {
+        _ = dump_with;
+
+        Ok(syn::parse_quote!({
+            #opcodes_arg.add_ext_range(#code_min, #code_max, #total_bits, #function_name)?;
+        }))
+    }
 }
 
 enum OpcodeTy {

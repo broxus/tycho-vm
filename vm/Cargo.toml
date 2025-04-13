@@ -54,4 +54,5 @@ everscale-asm-macros = { workspace = true }
 
 [features]
 tracing = ["dep:tracing", "everscale-types/base64"]
+dump = ["tycho-vm-proc/dump"]
 arbitrary = ["dep:arbitrary", "everscale-types/arbitrary", "num-bigint/arbitrary"]

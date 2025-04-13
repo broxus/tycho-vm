@@ -1,6 +1,5 @@
 use std::borrow::Cow;
 
-use anyhow::Result;
 use everscale_types::cell::{
     Cell, CellBuilder, CellContext, CellFamily, CellSlice, DynCell, HashBytes, LoadMode,
 };
@@ -10,11 +9,16 @@ use num_traits::ToPrimitive;
 use tycho_vm_proc::vm_module;
 
 use crate::cont::OrdCont;
-use crate::dispatch::Opcodes;
+#[cfg(feature = "dump")]
+use crate::dispatch::DumpOutput;
+#[cfg(feature = "dump")]
+use crate::error::{DumpError, DumpResult};
 use crate::error::{VmError, VmResult};
 use crate::saferc::SafeRc;
 use crate::stack::{Stack, StackValue};
 use crate::state::VmState;
+#[cfg(feature = "dump")]
+use crate::util::CellSliceExt;
 use crate::util::{bitsize, load_int_from_slice, remove_trailing, OwnedCellSlice};
 
 pub struct CellOps;
@@ -23,47 +27,112 @@ pub struct CellOps;
 impl CellOps {
     // === Const ops ===
 
-    #[init]
-    fn init_cell_const(&self, t: &mut Opcodes) -> Result<()> {
-        t.add_ext(0x88, 8, 0, exec_push_ref)?;
-        t.add_ext(0x89, 8, 0, exec_push_ref_slice)?;
-        t.add_ext(0x8a, 8, 0, exec_push_ref_cont)?;
-        t.add_ext(0x8b, 8, 4, exec_push_slice)?;
-        t.add_ext(0x8c, 8, 7, exec_push_slice_r)?;
-        t.add_ext_range(0x8d << 10, ((0x8d << 3) + 5) << 7, 18, exec_push_slice_r2)?;
-        t.add_ext(0x8e >> 1, 7, 9, exec_push_cont)?;
-        t.add_ext(0x9, 4, 4, exec_push_cont_simple)
-    }
-
+    #[op_ext(code = 0x88, code_bits = 8, arg_bits = 0, dump_with = dump_push_ref)]
     fn exec_push_ref(st: &mut VmState, _: u32, bits: u16) -> VmResult<i32> {
         exec_push_ref_common(st, bits, "PUSHREF", PushRefMode::Cell)
     }
 
+    #[cfg(feature = "dump")]
+    fn dump_push_ref(
+        code: &mut CellSlice<'_>,
+        _: u32,
+        bits: u16,
+        f: &mut dyn DumpOutput,
+    ) -> DumpResult {
+        dump_push_ref_common(code, bits, "PUSHREF", f)
+    }
+
+    #[op_ext(code = 0x89, code_bits = 8, arg_bits = 0, dump_with = dump_push_ref_slice)]
     fn exec_push_ref_slice(st: &mut VmState, _: u32, bits: u16) -> VmResult<i32> {
         exec_push_ref_common(st, bits, "PUSHREFSLICE", PushRefMode::Slice)
     }
 
+    #[cfg(feature = "dump")]
+    fn dump_push_ref_slice(
+        code: &mut CellSlice<'_>,
+        _: u32,
+        bits: u16,
+        f: &mut dyn DumpOutput,
+    ) -> DumpResult {
+        dump_push_ref_common(code, bits, "PUSHREFSLICE", f)
+    }
+
+    #[op_ext(code = 0x8a, code_bits = 8, arg_bits = 0, dump_with = dump_push_ref_cont)]
     fn exec_push_ref_cont(st: &mut VmState, _: u32, bits: u16) -> VmResult<i32> {
         exec_push_ref_common(st, bits, "PUSHREFCONT", PushRefMode::Cont)
     }
 
+    #[cfg(feature = "dump")]
+    fn dump_push_ref_cont(
+        code: &mut CellSlice<'_>,
+        _: u32,
+        bits: u16,
+        f: &mut dyn DumpOutput,
+    ) -> DumpResult {
+        dump_push_ref_common(code, bits, "PUSHREFCONT", f)
+    }
+
+    #[op_ext(code = 0x8b, code_bits = 8, arg_bits = 4, dump_with = dump_push_slice)]
     fn exec_push_slice(st: &mut VmState, args: u32, bits: u16) -> VmResult<i32> {
         let data_bits = ((args & 0xf) * 8 + 4) as u16;
         exec_push_slice_common(st, bits, data_bits, 0)
     }
 
+    #[cfg(feature = "dump")]
+    fn dump_push_slice(
+        code: &mut CellSlice<'_>,
+        args: u32,
+        bits: u16,
+        f: &mut dyn DumpOutput,
+    ) -> DumpResult {
+        let data_bits = ((args & 0xf) * 8 + 4) as u16;
+        dump_push_slice_common(code, bits, data_bits, 0, f)
+    }
+
+    #[op_ext(code = 0x8c, code_bits = 8, arg_bits = 7, dump_with = dump_push_slice_r)]
     fn exec_push_slice_r(st: &mut VmState, args: u32, bits: u16) -> VmResult<i32> {
         let data_bits = ((args & 0x1f) * 8 + 1) as u16;
         let refs = (((args >> 5) & 0b11) + 1) as u8;
         exec_push_slice_common(st, bits, data_bits, refs)
     }
 
+    #[cfg(feature = "dump")]
+    fn dump_push_slice_r(
+        code: &mut CellSlice<'_>,
+        args: u32,
+        bits: u16,
+        f: &mut dyn DumpOutput,
+    ) -> DumpResult {
+        let data_bits = ((args & 0x1f) * 8 + 1) as u16;
+        let refs = (((args >> 5) & 0b11) + 1) as u8;
+        dump_push_slice_common(code, bits, data_bits, refs, f)
+    }
+
+    #[op_ext_range(
+        code_min = 0x8d << 10,
+        code_max = ((0x8d << 3) + 5) << 7,
+        total_bits = 18,
+        dump_with = dump_push_slice_r2,
+    )]
     fn exec_push_slice_r2(st: &mut VmState, args: u32, bits: u16) -> VmResult<i32> {
         let data_bits = ((args & 0x7f) * 8 + 6) as u16;
         let refs = ((args >> 7) & 0b111) as u8;
         exec_push_slice_common(st, bits, data_bits, refs)
     }
 
+    #[cfg(feature = "dump")]
+    fn dump_push_slice_r2(
+        code: &mut CellSlice<'_>,
+        args: u32,
+        bits: u16,
+        f: &mut dyn DumpOutput,
+    ) -> DumpResult {
+        let data_bits = ((args & 0x7f) * 8 + 6) as u16;
+        let refs = ((args >> 7) & 0b111) as u8;
+        dump_push_slice_common(code, bits, data_bits, refs, f)
+    }
+
+    #[op_ext(code = 0x8e >> 1, code_bits = 7, arg_bits = 9, dump_with = dump_push_cont)]
     fn exec_push_cont(st: &mut VmState, args: u32, bits: u16) -> VmResult<i32> {
         let data_bits = ((args & 0x7f) * 8) as u16;
         let refs = ((args >> 7) & 0b11) as u8;
@@ -88,6 +157,29 @@ impl CellOps {
         Ok(0)
     }
 
+    #[cfg(feature = "dump")]
+    fn dump_push_cont(
+        code: &mut CellSlice<'_>,
+        args: u32,
+        bits: u16,
+        f: &mut dyn DumpOutput,
+    ) -> DumpResult {
+        let data_bits = ((args & 0x7f) * 8) as u16;
+        let refs = ((args >> 7) & 0b11) as u8;
+
+        if !code.has_remaining(bits + data_bits, refs) {
+            return Err(DumpError::InvalidOpcode);
+        }
+        code.skip_first(bits, 0)?;
+
+        let mut slice = *code;
+        slice.only_first(data_bits, refs)?;
+        code.skip_first(data_bits, refs)?;
+
+        f.record_opcode(&format_args!("PUSHCONT {}", slice.display_as_stack_value()))
+    }
+
+    #[op_ext(code = 0x9, code_bits = 4, arg_bits = 4, dump_with = dump_push_cont_simple)]
     fn exec_push_cont_simple(st: &mut VmState, args: u32, bits: u16) -> VmResult<i32> {
         let data_bits = ((args & 0xf) * 8) as u16;
 
@@ -106,6 +198,27 @@ impl CellOps {
         let cont = SafeRc::new(OrdCont::simple(code, st.cp.id()));
         ok!(SafeRc::make_mut(&mut st.stack).push_raw(cont));
         Ok(0)
+    }
+
+    #[cfg(feature = "dump")]
+    fn dump_push_cont_simple(
+        code: &mut CellSlice<'_>,
+        args: u32,
+        bits: u16,
+        f: &mut dyn DumpOutput,
+    ) -> DumpResult {
+        let data_bits = ((args & 0xf) * 8) as u16;
+
+        if !code.has_remaining(bits + data_bits, 0) {
+            return Err(DumpError::InvalidOpcode);
+        }
+        code.skip_first(bits, 0)?;
+
+        let mut slice = *code;
+        slice.only_first(data_bits, 0)?;
+        code.skip_first(data_bits, 0)?;
+
+        f.record_opcode(&format_args!("PUSHCONT {}", slice.display_as_stack_value()))
     }
 
     // === Slice comparison ops ===
@@ -208,12 +321,6 @@ impl CellOps {
     }
 
     // === Serializer ops ===
-
-    #[init]
-    fn init_serializer_ops(&self, t: &mut Opcodes) -> Result<()> {
-        t.add_ext_range(0xcf20, 0xcf22, 16, exec_store_const_ref)?;
-        t.add_ext(0xcf80 >> 7, 9, 5, exec_store_const_slice)
-    }
 
     #[op(code = "c8", fmt = "NEWC")]
     fn exec_new_builder(st: &mut VmState) -> VmResult<i32> {
@@ -388,6 +495,7 @@ impl CellOps {
         finish_store_ok(stack, builder, quiet)
     }
 
+    #[op_ext_range(code_min = 0xcf20, code_max = 0xcf22, total_bits = 16, dump_with = dump_store_const_ref)]
     fn exec_store_const_ref(st: &mut VmState, args: u32, bits: u16) -> VmResult<i32> {
         let refs = ((args & 1) + 1) as u8;
         let code_range = st.code.range_mut();
@@ -416,6 +524,21 @@ impl CellOps {
 
         ok!(stack.push_raw(builder));
         Ok(0)
+    }
+
+    #[cfg(feature = "dump")]
+    fn dump_store_const_ref(
+        code: &mut CellSlice<'_>,
+        args: u32,
+        bits: u16,
+        f: &mut dyn DumpOutput,
+    ) -> DumpResult {
+        let refs = ((args & 1) + 1) as u8;
+        if !code.has_remaining(bits, refs) {
+            return Err(DumpError::InvalidOpcode);
+        }
+        code.skip_first(bits, refs)?;
+        f.record_opcode(&format_args!("STREF{refs}CONST"))
     }
 
     #[op(code = "cf22$ss", fmt = "{s}", args(s = StoreLeIntArgs(args)))]
@@ -613,6 +736,7 @@ impl CellOps {
     }
 
     // cf$1xxxxx
+    #[op_ext(code = 0xcf80 >> 7, code_bits = 9, arg_bits = 5, dump_with = dump_store_const_slice)]
     fn exec_store_const_slice(st: &mut VmState, args: u32, bits: u16) -> VmResult<i32> {
         let data_bits = ((args & 0b111) * 8 + 2) as u16;
         let refs = ((args >> 3) & 0b11) as u8;
@@ -645,12 +769,35 @@ impl CellOps {
         Ok(0)
     }
 
-    // === Deserializer ops ===
+    #[cfg(feature = "dump")]
+    fn dump_store_const_slice(
+        code: &mut CellSlice<'_>,
+        args: u32,
+        bits: u16,
+        f: &mut dyn DumpOutput,
+    ) -> DumpResult {
+        let data_bits = ((args & 0b111) * 8 + 2) as u16;
+        let refs = ((args >> 3) & 0b11) as u8;
 
-    #[init]
-    fn init_deserializer_ops(&self, t: &mut Opcodes) -> Result<()> {
-        t.add_ext(0xd728 >> 3, 13, 8, exec_slice_begins_with_const)
+        if !code.has_remaining(bits + data_bits, refs) {
+            return Err(DumpError::InvalidOpcode);
+        }
+        code.skip_first(bits, 0)?;
+
+        let mut slice = *code;
+        slice.only_first(data_bits, refs)?;
+        code.skip_first(data_bits, refs)?;
+
+        // Remove tag and trailing zeroes
+        remove_trailing(&mut slice)?;
+
+        f.record_opcode(&format_args!(
+            "STSLICECONST {}",
+            slice.display_as_stack_value()
+        ))
     }
+
+    // === Deserializer ops ===
 
     #[op(code = "d0", fmt = "CTOS")]
     fn exec_cell_to_slice(st: &mut VmState) -> VmResult<i32> {
@@ -872,6 +1019,7 @@ impl CellOps {
     }
 
     // d72$1xxxxxxxx
+    #[op_ext(code = 0xd728 >> 3, code_bits = 13, arg_bits = 8, dump_with = dump_slice_begins_with_const)]
     fn exec_slice_begins_with_const(st: &mut VmState, args: u32, bits: u16) -> VmResult<i32> {
         let quiet = (args & 0x80) != 0;
         let data_bits = ((args & 0x7f) * 8 + 3) as u16;
@@ -897,6 +1045,35 @@ impl CellOps {
 
         let stack = SafeRc::make_mut(&mut st.stack);
         exec_slice_begins_with_common(stack, &slice, quiet)
+    }
+
+    #[cfg(feature = "dump")]
+    fn dump_slice_begins_with_const(
+        code: &mut CellSlice<'_>,
+        args: u32,
+        bits: u16,
+        f: &mut dyn DumpOutput,
+    ) -> DumpResult {
+        let quiet = (args & 0x80) != 0;
+        let data_bits = ((args & 0x7f) * 8 + 3) as u16;
+
+        if !code.has_remaining(bits + data_bits, 0) {
+            return Err(DumpError::InvalidOpcode);
+        }
+        code.skip_first(bits, 0)?;
+
+        let mut slice = *code;
+        slice.only_first(data_bits, 0)?;
+        code.skip_first(data_bits, 0)?;
+
+        // Remove tag and trailing zeroes
+        remove_trailing(&mut slice)?;
+
+        f.record_opcode(&format_args!(
+            "SDBEGINS{} {}",
+            if quiet { "Q" } else { "" },
+            slice.display_as_stack_value()
+        ))
     }
 
     #[op(code = "d730", fmt = "SCUTFIRST", args(op = SliceRangeOp::CutFirst))]
@@ -1283,6 +1460,21 @@ enum PushRefMode {
     Cont,
 }
 
+#[cfg(feature = "dump")]
+fn dump_push_ref_common(
+    code: &mut CellSlice<'_>,
+    bits: u16,
+    name: &str,
+    f: &mut dyn DumpOutput,
+) -> DumpResult {
+    if !code.has_remaining(bits, 1) {
+        return Err(DumpError::InvalidOpcode);
+    }
+    code.skip_first(bits, 0)?;
+    let cell = code.load_reference_cloned()?;
+    f.record_opcode(&format_args!("{name} ({})", cell.repr_hash()))
+}
+
 fn exec_push_ref_common(
     st: &mut VmState,
     bits: u16,
@@ -1343,6 +1535,33 @@ fn exec_push_slice_common(st: &mut VmState, bits: u16, data_bits: u16, refs: u8)
 
     ok!(SafeRc::make_mut(&mut st.stack).push_raw(slice));
     Ok(0)
+}
+
+#[cfg(feature = "dump")]
+fn dump_push_slice_common(
+    code: &mut CellSlice<'_>,
+    bits: u16,
+    data_bits: u16,
+    refs: u8,
+    f: &mut dyn DumpOutput,
+) -> DumpResult {
+    if !code.has_remaining(bits + data_bits, refs) {
+        return Err(DumpError::InvalidOpcode);
+    }
+
+    code.skip_first(bits, 0)?;
+
+    let mut slice = *code;
+    slice.only_first(data_bits, refs)?;
+    code.skip_first(data_bits, refs)?;
+
+    // Remove tag and trailing zeroes
+    remove_trailing(&mut slice)?;
+
+    f.record_opcode(&format_args!(
+        "PUSHSLICE {}",
+        slice.display_as_stack_value()
+    ))
 }
 
 #[derive(Clone, Copy)]

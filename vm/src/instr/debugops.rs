@@ -1,8 +1,12 @@
-use anyhow::Result;
+#[cfg(feature = "dump")]
+use everscale_types::prelude::*;
 use tycho_vm_proc::vm_module;
 
-use crate::dispatch::Opcodes;
+#[cfg(feature = "dump")]
+use crate::dispatch::DumpOutput;
 use crate::error::VmResult;
+#[cfg(feature = "dump")]
+use crate::error::{DumpError, DumpResult};
 use crate::state::VmState;
 
 pub struct DebugOps;
@@ -81,11 +85,7 @@ impl DebugOps {
         Ok(0)
     }
 
-    #[init]
-    fn init_dummy_debug_str_ext(&self, t: &mut Opcodes) -> Result<()> {
-        t.add_ext(0xfef, 12, 4, exec_dummy_debug_str)
-    }
-
+    #[op_ext(code = 0xfef, code_bits = 12, arg_bits = 4, dump_with = dump_dummy_debug_str)]
     fn exec_dummy_debug_str(st: &mut VmState, args: u32, bits: u16) -> VmResult<i32> {
         let data_bits = ((args & 0xf) + 1) as u16 * 8;
         vm_ensure!(
@@ -96,5 +96,20 @@ impl DebugOps {
         debug_assert!(ok);
 
         Ok(0)
+    }
+
+    #[cfg(feature = "dump")]
+    fn dump_dummy_debug_str(
+        code: &mut CellSlice<'_>,
+        args: u32,
+        bits: u16,
+        f: &mut dyn DumpOutput,
+    ) -> DumpResult {
+        let data_bits = ((args & 0xf) + 1) as u16 * 8;
+        if !code.has_remaining(bits + data_bits, 0) {
+            return Err(DumpError::InvalidOpcode);
+        }
+        code.skip_first(bits + data_bits, 0)?;
+        f.record_opcode(&"DEBUGSTR")
     }
 }

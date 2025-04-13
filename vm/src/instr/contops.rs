@@ -1,10 +1,12 @@
-use anyhow::Result;
-use everscale_types::prelude::Cell;
+use everscale_types::prelude::*;
 use tycho_vm_proc::vm_module;
 
 use crate::cont::{ArgContExt, ControlData, ControlRegs, OrdCont, PushIntCont, RcCont};
-use crate::dispatch::Opcodes;
+#[cfg(feature = "dump")]
+use crate::dispatch::DumpOutput;
 use crate::error::VmResult;
+#[cfg(feature = "dump")]
+use crate::error::{DumpError, DumpResult};
 use crate::saferc::SafeRc;
 use crate::stack::{Stack, StackValueType};
 use crate::state::{SaveCr, VmState};
@@ -131,27 +133,53 @@ impl ContOps {
         st.jump(cont)
     }
 
-    #[init]
-    fn init_jumps_with_ref(&self, t: &mut Opcodes) -> Result<()> {
-        ok!(t.add_ext(0xdb3c, 16, 0, exec_callref));
-        ok!(t.add_ext(0xdb3d, 16, 0, exec_jmpref));
-        t.add_ext(0xdb3e, 16, 0, exec_jmpref_data)
-    }
-
+    #[op_ext(code = 0xdb3c, code_bits = 16, arg_bits = 0, dump_with = dump_callref)]
     fn exec_callref(st: &mut VmState, _: u32, bits: u16) -> VmResult<i32> {
         let cont = ok!(exec_ref_prefix(st, bits, "CALLREF"));
         st.call(cont)
     }
 
+    #[cfg(feature = "dump")]
+    fn dump_callref(
+        code: &mut CellSlice<'_>,
+        _: u32,
+        bits: u16,
+        f: &mut dyn DumpOutput,
+    ) -> DumpResult {
+        dump_ref_prefix(code, bits, "CALLREF", f)
+    }
+
+    #[op_ext(code = 0xdb3d, code_bits = 16, arg_bits = 0, dump_with = dump_jmpref)]
     fn exec_jmpref(st: &mut VmState, _: u32, bits: u16) -> VmResult<i32> {
         let cont = ok!(exec_ref_prefix(st, bits, "JMPREF"));
         st.jump(cont)
     }
 
+    #[cfg(feature = "dump")]
+    fn dump_jmpref(
+        code: &mut CellSlice<'_>,
+        _: u32,
+        bits: u16,
+        f: &mut dyn DumpOutput,
+    ) -> DumpResult {
+        dump_ref_prefix(code, bits, "JMPREF", f)
+    }
+
+    #[op_ext(code = 0xdb3e, code_bits = 16, arg_bits = 0, dump_with = dump_jmpref_data)]
     fn exec_jmpref_data(st: &mut VmState, _: u32, bits: u16) -> VmResult<i32> {
         let cont = ok!(exec_ref_prefix(st, bits, "JMPREFDATA"));
         ok!(SafeRc::make_mut(&mut st.stack).push(st.code.clone()));
         st.jump(cont)
+    }
+
+    #[cfg(feature = "dump")]
+    fn dump_jmpref_data(
+        code: &mut CellSlice<'_>,
+        _: u32,
+        bits: u16,
+        f: &mut dyn DumpOutput,
+    ) -> DumpResult {
+        dump_ref_prefix(code, bits, "JMPREFDATA", f)
     }
 
     #[op(code = "db3f", fmt = "RETDATA")]
@@ -238,14 +266,7 @@ impl ContOps {
         st.call(cont)
     }
 
-    #[init]
-    fn init_if_with_ref(&self, t: &mut Opcodes) -> Result<()> {
-        ok!(t.add_ext(0xe300, 16, 0, exec_ifref));
-        ok!(t.add_ext(0xe301, 16, 0, exec_ifnotref));
-        ok!(t.add_ext(0xe302, 16, 0, exec_ifjmpref));
-        t.add_ext(0xe303, 16, 0, exec_ifnotjmpref)
-    }
-
+    #[op_ext(code = 0xe300, code_bits = 16, arg_bits = 0, dump_with = dump_ifref)]
     fn exec_ifref(st: &mut VmState, _: u32, bits: u16) -> VmResult<i32> {
         let cell = ok!(exec_cell_prefix(st, bits, "IFREF"));
         if ok!(SafeRc::make_mut(&mut st.stack).pop_bool()) {
@@ -256,6 +277,17 @@ impl ContOps {
         }
     }
 
+    #[cfg(feature = "dump")]
+    fn dump_ifref(
+        code: &mut CellSlice<'_>,
+        _: u32,
+        bits: u16,
+        f: &mut dyn DumpOutput,
+    ) -> DumpResult {
+        dump_ref_prefix(code, bits, "IFREF", f)
+    }
+
+    #[op_ext(code = 0xe301, code_bits = 16, arg_bits = 0, dump_with = dump_ifnotref)]
     fn exec_ifnotref(st: &mut VmState, _: u32, bits: u16) -> VmResult<i32> {
         let cell = ok!(exec_cell_prefix(st, bits, "IFNOTREF"));
         if ok!(SafeRc::make_mut(&mut st.stack).pop_bool()) {
@@ -266,6 +298,17 @@ impl ContOps {
         }
     }
 
+    #[cfg(feature = "dump")]
+    fn dump_ifnotref(
+        code: &mut CellSlice<'_>,
+        _: u32,
+        bits: u16,
+        f: &mut dyn DumpOutput,
+    ) -> DumpResult {
+        dump_ref_prefix(code, bits, "IFNOTREF", f)
+    }
+
+    #[op_ext(code = 0xe302, code_bits = 16, arg_bits = 0, dump_with = dump_ifjmpref)]
     fn exec_ifjmpref(st: &mut VmState, _: u32, bits: u16) -> VmResult<i32> {
         let cell = ok!(exec_cell_prefix(st, bits, "IFJMPREF"));
         if ok!(SafeRc::make_mut(&mut st.stack).pop_bool()) {
@@ -276,6 +319,17 @@ impl ContOps {
         }
     }
 
+    #[cfg(feature = "dump")]
+    fn dump_ifjmpref(
+        code: &mut CellSlice<'_>,
+        _: u32,
+        bits: u16,
+        f: &mut dyn DumpOutput,
+    ) -> DumpResult {
+        dump_ref_prefix(code, bits, "IFJMPREF", f)
+    }
+
+    #[op_ext(code = 0xe303, code_bits = 16, arg_bits = 0, dump_with = dump_ifnotjmpref)]
     fn exec_ifnotjmpref(st: &mut VmState, _: u32, bits: u16) -> VmResult<i32> {
         let cell = ok!(exec_cell_prefix(st, bits, "IFNOTJMPREF"));
         if ok!(SafeRc::make_mut(&mut st.stack).pop_bool()) {
@@ -284,6 +338,16 @@ impl ContOps {
             let cont = ok!(st.ref_to_cont(cell));
             st.jump(cont)
         }
+    }
+
+    #[cfg(feature = "dump")]
+    fn dump_ifnotjmpref(
+        code: &mut CellSlice<'_>,
+        _: u32,
+        bits: u16,
+        f: &mut dyn DumpOutput,
+    ) -> DumpResult {
+        dump_ref_prefix(code, bits, "IFNOTJMPREF", f)
     }
 
     #[op(code = "e304", fmt = "CONDSEL")]
@@ -334,22 +398,37 @@ impl ContOps {
         }
     }
 
-    #[init]
-    fn init_ifelse_with_ref(&self, t: &mut Opcodes) -> Result<()> {
-        ok!(t.add_ext(0xe30d, 16, 0, exec_ifrefelse));
-        ok!(t.add_ext(0xe30e, 16, 0, exec_ifelseref));
-        ok!(t.add_ext(0xe30f, 16, 0, exec_ifref_elseref));
-        t.add_ext(0xe3c0 >> 6, 10, 0, exec_if_bit_jmpref)
-    }
-
+    #[op_ext(code = 0xe30d, code_bits = 16, arg_bits = 0, dump_with = dump_ifrefelse)]
     fn exec_ifrefelse(st: &mut VmState, _: u32, bits: u16) -> VmResult<i32> {
         exec_ifelse_ref_impl(st, bits, true)
     }
 
+    #[cfg(feature = "dump")]
+    fn dump_ifrefelse(
+        code: &mut CellSlice<'_>,
+        _: u32,
+        bits: u16,
+        f: &mut dyn DumpOutput,
+    ) -> DumpResult {
+        dump_ref_prefix(code, bits, "IFREFELSE", f)
+    }
+
+    #[op_ext(code = 0xe30e, code_bits = 16, arg_bits = 0, dump_with = dump_ifelseref)]
     fn exec_ifelseref(st: &mut VmState, _: u32, bits: u16) -> VmResult<i32> {
         exec_ifelse_ref_impl(st, bits, false)
     }
 
+    #[cfg(feature = "dump")]
+    fn dump_ifelseref(
+        code: &mut CellSlice<'_>,
+        _: u32,
+        bits: u16,
+        f: &mut dyn DumpOutput,
+    ) -> DumpResult {
+        dump_ref_prefix(code, bits, "IFELSEREF", f)
+    }
+
+    #[op_ext(code = 0xe30f, code_bits = 16, arg_bits = 0, dump_with = dump_ifref_elseref)]
     fn exec_ifref_elseref(st: &mut VmState, _: u32, bits: u16) -> VmResult<i32> {
         let cell = {
             let code = &mut st.code;
@@ -384,6 +463,28 @@ impl ContOps {
         st.call(cont)
     }
 
+    #[cfg(feature = "dump")]
+    fn dump_ifref_elseref(
+        code: &mut CellSlice<'_>,
+        _: u32,
+        bits: u16,
+        f: &mut dyn DumpOutput,
+    ) -> DumpResult {
+        if !code.has_remaining(bits, 2) {
+            return Err(DumpError::InvalidOpcode);
+        }
+        code.skip_first(bits, 0)?;
+
+        let cell1 = code.load_reference_cloned()?;
+        let cell0 = code.load_reference_cloned()?;
+
+        f.record_opcode(&format_args!(
+            "IFREFELSEREF ({}) ({})",
+            cell1.repr_hash(),
+            cell0.repr_hash()
+        ))
+    }
+
     #[op(code = "e3$10nx#x", fmt = ("IF{}BITJMP {x}", if n { "N" } else { "" }))]
     fn exec_if_bit_jmp(st: &mut VmState, n: bool, x: u32) -> VmResult<i32> {
         let (cont, bit) = {
@@ -402,6 +503,7 @@ impl ContOps {
         }
     }
 
+    #[op_ext(code = 0xe3c0 >> 6, code_bits = 10, arg_bits = 0, dump_with = dump_if_bit_jmpref)]
     fn exec_if_bit_jmpref(st: &mut VmState, args: u32, bits: u16) -> VmResult<i32> {
         let code_range = st.code.range();
         vm_ensure!(code_range.has_remaining(bits, 1), InvalidOpcode);
@@ -436,6 +538,28 @@ impl ContOps {
         } else {
             Ok(0)
         }
+    }
+
+    #[cfg(feature = "dump")]
+    fn dump_if_bit_jmpref(
+        code: &mut CellSlice<'_>,
+        args: u32,
+        bits: u16,
+        f: &mut dyn DumpOutput,
+    ) -> DumpResult {
+        if !code.has_remaining(bits, 1) {
+            return Err(DumpError::InvalidOpcode);
+        }
+        code.skip_first(bits, 0)?;
+        let cell = code.load_reference_cloned()?;
+
+        let negate = (args & 0x20) != 0;
+        let bit = args & 0x1f;
+        f.record_opcode(&format_args!(
+            "{}BITJMPREF {bit} ({})",
+            if negate { "N" } else { "" },
+            cell.repr_hash()
+        ))
     }
 
     #[op(code = "e4", fmt = "REPEAT", args(brk = false))]
@@ -1036,6 +1160,22 @@ fn exec_ref_prefix(st: &mut VmState, bits: u16, name: &str) -> VmResult<RcCont> 
 
     vm_log_op!("{name} ({})", code.repr_hash());
     st.ref_to_cont(code)
+}
+
+#[cfg(feature = "dump")]
+fn dump_ref_prefix(
+    code: &mut CellSlice<'_>,
+    bits: u16,
+    name: &str,
+    f: &mut dyn DumpOutput,
+) -> DumpResult {
+    if !code.has_remaining(bits, 1) {
+        return Err(DumpError::InvalidOpcode);
+    }
+    code.skip_first(bits, 0)?;
+    let code = code.load_reference_cloned()?;
+
+    f.record_opcode(&format_args!("{name} ({})", code.repr_hash()))
 }
 
 fn exec_cell_prefix(st: &mut VmState, bits: u16, name: &str) -> VmResult<Cell> {

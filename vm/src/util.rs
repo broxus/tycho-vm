@@ -52,13 +52,34 @@ impl OwnedCellSlice {
 impl std::fmt::Display for OwnedCellSlice {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let cs = CellSlice::apply_allow_exotic(&self.0);
-        ok!(write!(f, "x{:X}", cs.display_data()));
-        let refs = cs.size_refs();
-        if refs != 0 {
-            write!(f, ",{refs}")
-        } else {
-            Ok(())
+        let cs = cs.display_as_stack_value();
+        std::fmt::Display::fmt(&cs, f)
+    }
+}
+
+pub(crate) trait CellSliceExt<'a> {
+    fn display_as_stack_value(&self) -> impl std::fmt::Display + 'a;
+}
+
+impl<'a> CellSliceExt<'a> for CellSlice<'a> {
+    fn display_as_stack_value(&self) -> impl std::fmt::Display + 'a {
+        #[repr(transparent)]
+        struct Display<'a>(CellSlice<'a>);
+
+        impl std::fmt::Display for Display<'_> {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                let cs = &self.0;
+                ok!(write!(f, "x{:X}", cs.display_data()));
+                let refs = cs.size_refs();
+                if refs != 0 {
+                    write!(f, ",{refs}")
+                } else {
+                    Ok(())
+                }
+            }
         }
+
+        Display(*self)
     }
 }
 

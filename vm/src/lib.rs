@@ -160,8 +160,15 @@ pub use self::cont::{
     QuitCont, RcCont, RepeatCont, UntilCont, WhileCont,
 };
 pub use self::dispatch::{
-    DispatchTable, FnExecInstrArg, FnExecInstrFull, FnExecInstrSimple, Opcode, Opcodes,
+    DispatchTable, FnExecInstrArg, FnExecInstrFull, FnExecInstrSimple, OpcodeBase, OpcodeExec,
+    Opcodes,
 };
+#[cfg(feature = "dump")]
+pub use self::dispatch::{
+    DumpOutput, FnDumpInstrArg, FnDumpInstrFull, FnDumpInstrSimple, OpcodeDump,
+};
+#[cfg(feature = "dump")]
+pub use self::error::{DumpError, DumpResult};
 pub use self::error::{VmError, VmException, VmResult};
 pub use self::gas::{GasConsumer, GasParams, LibraryProvider, NoLibraries};
 pub use self::instr::{codepage, codepage0};

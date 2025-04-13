@@ -1,13 +1,15 @@
-use everscale_types::cell::{CellBuilder, CellSlice, CellSliceParts, Load, Size};
 use everscale_types::dict::{self, DictBound, SetMode};
 use everscale_types::error::Error;
-use everscale_types::prelude::{Cell, CellFamily, Store};
+use everscale_types::prelude::*;
 use num_bigint::Sign;
 use tycho_vm_proc::vm_module;
 
 use crate::cont::OrdCont;
-use crate::dispatch::Opcodes;
+#[cfg(feature = "dump")]
+use crate::dispatch::DumpOutput;
 use crate::error::VmResult;
+#[cfg(feature = "dump")]
+use crate::error::{DumpError, DumpResult};
 use crate::saferc::SafeRc;
 use crate::stack::RcStackValue;
 use crate::state::VmState;
@@ -20,12 +22,6 @@ pub struct DictOps;
 
 #[vm_module]
 impl DictOps {
-    #[init]
-    fn init_dict_const(&self, t: &mut Opcodes) -> anyhow::Result<()> {
-        t.add_ext_range(0xf4a400, 0xf4a800, 24, exec_push_const_dict)?;
-        Ok(())
-    }
-
     #[op(code = "f400", fmt = "STDICT")]
     fn exec_stdict(st: &mut VmState) -> VmResult<i32> {
         let stack = SafeRc::make_mut(&mut st.stack);
@@ -608,6 +604,12 @@ impl DictOps {
     }
 
     // f4a400..f4a800
+    #[op_ext_range(
+        code_min = 0xf4a400,
+        code_max = 0xf4a800,
+        total_bits = 24,
+        dump_with = dump_push_const_dict,
+    )]
     fn exec_push_const_dict(st: &mut VmState, _: u32, bits: u16) -> VmResult<i32> {
         vm_ensure!(st.code.range().has_remaining(bits, 1), InvalidOpcode);
         let ok = st.code.range_mut().skip_first(bits - 11, 0).is_ok();
@@ -630,6 +632,29 @@ impl DictOps {
         ok!(stack.push(dict));
         ok!(stack.push_int(n));
         Ok(0)
+    }
+
+    #[cfg(feature = "dump")]
+    fn dump_push_const_dict(
+        code: &mut CellSlice<'_>,
+        _: u32,
+        bits: u16,
+        f: &mut dyn DumpOutput,
+    ) -> DumpResult {
+        use crate::util::CellSliceExt;
+
+        if !code.has_remaining(bits, 1) {
+            return Err(DumpError::InvalidOpcode);
+        }
+        code.skip_first(bits - 11, 0)?;
+
+        let slice = code.load_prefix(1, 1)?;
+        let n = code.load_uint(10)? as u16;
+
+        f.record_opcode(&format_args!(
+            "DICTPUSHCONST {n} ({})",
+            slice.display_as_stack_value()
+        ))
     }
 
     // TODO: Implement a proper subdictionary cut.
