@@ -985,6 +985,7 @@ mod tests {
         assert_run_vm!("PUSHINT 127", [] => [int 127]);
         assert_run_vm!("PUSHINT 32767", [] => [int 32767]);
         assert_run_vm!("PUSHINT 0x7FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF", [] => [int 0x7FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFi128]);
+        assert_run_vm!("PUSHINT 85143", [] => [int 85143]);
         assert_run_vm!("PUSHPOW2 1", [] => [int 2]);
         assert_run_vm!("PUSHPOW2 10", [] => [int (1 << 10)]);
         assert_run_vm!("PUSHPOW2 255", [] => [int (BigInt::from(1) << 255)]);

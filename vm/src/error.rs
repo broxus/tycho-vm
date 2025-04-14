@@ -92,6 +92,8 @@ pub enum DumpError {
     InvalidCode(#[from] everscale_types::error::Error),
     #[error("invalid opcode")]
     InvalidOpcode,
+    #[error("unexpected cell")]
+    CellMismatch,
     #[error(transparent)]
     WriterError(#[from] std::fmt::Error),
 }

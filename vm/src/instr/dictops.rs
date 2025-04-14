@@ -651,6 +651,7 @@ impl DictOps {
         let slice = code.load_prefix(1, 1)?;
         let n = code.load_uint(10)? as u16;
 
+        f.record_dict(n, slice)?;
         f.record_opcode(&format_args!(
             "DICTPUSHCONST {n} ({})",
             slice.display_as_stack_value()

@@ -39,7 +39,7 @@ impl CellOps {
         bits: u16,
         f: &mut dyn DumpOutput,
     ) -> DumpResult {
-        dump_push_ref_common(code, bits, "PUSHREF", f)
+        dump_push_ref_common(code, bits, "PUSHREF", false, f)
     }
 
     #[op_ext(code = 0x89, code_bits = 8, arg_bits = 0, dump_with = dump_push_ref_slice)]
@@ -54,7 +54,7 @@ impl CellOps {
         bits: u16,
         f: &mut dyn DumpOutput,
     ) -> DumpResult {
-        dump_push_ref_common(code, bits, "PUSHREFSLICE", f)
+        dump_push_ref_common(code, bits, "PUSHREFSLICE", false, f)
     }
 
     #[op_ext(code = 0x8a, code_bits = 8, arg_bits = 0, dump_with = dump_push_ref_cont)]
@@ -69,7 +69,7 @@ impl CellOps {
         bits: u16,
         f: &mut dyn DumpOutput,
     ) -> DumpResult {
-        dump_push_ref_common(code, bits, "PUSHREFCONT", f)
+        dump_push_ref_common(code, bits, "PUSHREFCONT", true, f)
     }
 
     #[op_ext(code = 0x8b, code_bits = 8, arg_bits = 4, dump_with = dump_push_slice)]
@@ -176,6 +176,7 @@ impl CellOps {
         slice.only_first(data_bits, refs)?;
         code.skip_first(data_bits, refs)?;
 
+        f.record_cont_slice(slice)?;
         f.record_opcode(&format_args!("PUSHCONT {}", slice.display_as_stack_value()))
     }
 
@@ -218,6 +219,7 @@ impl CellOps {
         slice.only_first(data_bits, 0)?;
         code.skip_first(data_bits, 0)?;
 
+        f.record_cont_slice(slice)?;
         f.record_opcode(&format_args!("PUSHCONT {}", slice.display_as_stack_value()))
     }
 
@@ -537,7 +539,11 @@ impl CellOps {
         if !code.has_remaining(bits, refs) {
             return Err(DumpError::InvalidOpcode);
         }
-        code.skip_first(bits, refs)?;
+        code.skip_first(bits, 0)?;
+        for _ in 0..refs {
+            let cell = code.load_reference_cloned()?;
+            f.record_cell(cell)?;
+        }
         f.record_opcode(&format_args!("STREF{refs}CONST"))
     }
 
@@ -791,6 +797,7 @@ impl CellOps {
         // Remove tag and trailing zeroes
         remove_trailing(&mut slice)?;
 
+        f.record_slice(slice)?;
         f.record_opcode(&format_args!(
             "STSLICECONST {}",
             slice.display_as_stack_value()
@@ -1069,6 +1076,7 @@ impl CellOps {
         // Remove tag and trailing zeroes
         remove_trailing(&mut slice)?;
 
+        f.record_slice(slice)?;
         f.record_opcode(&format_args!(
             "SDBEGINS{} {}",
             if quiet { "Q" } else { "" },
@@ -1465,6 +1473,7 @@ fn dump_push_ref_common(
     code: &mut CellSlice<'_>,
     bits: u16,
     name: &str,
+    as_cont: bool,
     f: &mut dyn DumpOutput,
 ) -> DumpResult {
     if !code.has_remaining(bits, 1) {
@@ -1472,6 +1481,11 @@ fn dump_push_ref_common(
     }
     code.skip_first(bits, 0)?;
     let cell = code.load_reference_cloned()?;
+    if as_cont {
+        f.record_cont(cell.clone())?;
+    } else {
+        f.record_cell(cell.clone())?;
+    }
     f.record_opcode(&format_args!("{name} ({})", cell.repr_hash()))
 }
 
@@ -1558,6 +1572,7 @@ fn dump_push_slice_common(
     // Remove tag and trailing zeroes
     remove_trailing(&mut slice)?;
 
+    f.record_slice(slice)?;
     f.record_opcode(&format_args!(
         "PUSHSLICE {}",
         slice.display_as_stack_value()

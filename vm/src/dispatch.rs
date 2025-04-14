@@ -37,6 +37,11 @@ pub trait OpcodeDump: OpcodeBase {
 pub trait DumpOutput {
     fn record_gas(&mut self, gas: u64) -> DumpResult;
     fn record_opcode(&mut self, value: &dyn std::fmt::Display) -> DumpResult;
+    fn record_cell(&mut self, value: Cell) -> DumpResult;
+    fn record_slice(&mut self, value: CellSlice<'_>) -> DumpResult;
+    fn record_cont(&mut self, cont: Cell) -> DumpResult;
+    fn record_cont_slice(&mut self, cont: CellSlice<'_>) -> DumpResult;
+    fn record_dict(&mut self, n: u16, slice: CellSlice<'_>) -> DumpResult;
 }
 
 /// Code page.
@@ -481,7 +486,6 @@ impl OpcodeDump for ExtOpcode<FnDumpInstrFull> {
     ) -> DumpResult {
         if bits >= self.total_bits {
             f.record_gas(opcode_gas(self.total_bits))?;
-            code.skip_first(self.total_bits, 0)?;
             (self.f)(
                 code,
                 opcode >> (MAX_OPCODE_BITS - self.total_bits),

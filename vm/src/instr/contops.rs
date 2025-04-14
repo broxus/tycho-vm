@@ -478,6 +478,9 @@ impl ContOps {
         let cell1 = code.load_reference_cloned()?;
         let cell0 = code.load_reference_cloned()?;
 
+        f.record_cont(cell1.clone())?;
+        f.record_cont(cell0.clone())?;
+
         f.record_opcode(&format_args!(
             "IFREFELSEREF ({}) ({})",
             cell1.repr_hash(),
@@ -555,6 +558,8 @@ impl ContOps {
 
         let negate = (args & 0x20) != 0;
         let bit = args & 0x1f;
+
+        f.record_cont(cell.clone())?;
         f.record_opcode(&format_args!(
             "{}BITJMPREF {bit} ({})",
             if negate { "N" } else { "" },
@@ -1175,6 +1180,7 @@ fn dump_ref_prefix(
     code.skip_first(bits, 0)?;
     let code = code.load_reference_cloned()?;
 
+    f.record_cont(code.clone())?;
     f.record_opcode(&format_args!("{name} ({})", code.repr_hash()))
 }
 

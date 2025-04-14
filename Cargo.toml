@@ -7,14 +7,16 @@ license = "MIT OR Apache-2.0"
 
 [workspace]
 resolver = "2"
-members = ["executor", "vm", "vm-proc", "fuzz"]
+members = ["disasm", "executor", "vm", "vm-proc", "fuzz"]
 
 [workspace.dependencies]
 ahash = "0.8"
 anyhow = "1.0"
 arbitrary = "1"
+base64 = "0.22.1"
 bitflags = "2.4"
 blake2 = "0.10.6"
+bumpalo = "3.17"
 criterion = "0.5"
 darling = "0.20.11"
 dyn-clone = "1.0"
@@ -28,7 +30,10 @@ num-traits = "0.2"
 proc-macro2 = "1.0"
 quote = "1.0"
 rand = "0.8"
+serde = "1.0"
+serde_json = "1.0"
 sha2 = "0.10.8"
+smol_str = "0.3"
 syn = "2.0"
 thiserror = "2.0"
 tl-proto = "0.5.2"
@@ -41,4 +46,4 @@ everscale-asm-macros = { git = "https://github.com/broxus/everscale-asm.git", re
 tycho-vm = { path = "./vm" }
 
 [patch.crates-io]
-everscale-types = { git = "https://github.com/broxus/everscale-types.git", rev = "eb4b23f8722c04d837eb3d8f92c0889099c6483b" }
+everscale-types = { git = "https://github.com/broxus/everscale-types.git", rev = "82c343b2bd17ceb51db0575b6b8ee821ccda037e" }
