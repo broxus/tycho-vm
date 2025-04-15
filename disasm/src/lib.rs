@@ -9,11 +9,12 @@ use smol_str::SmolStr;
 use tycho_vm::{load_int_from_slice, DumpError, DumpOutput, DumpResult};
 
 pub use self::models::{
-    Code, CodeBlock, CodeBlockTail, Data, DataBlock, Item, ItemId, JumpTable, Library, Link,
-    LinkType, Opcode,
+    Code, CodeBlock, CodeBlockTail, Data, DataBlock, Item, ItemId, JumpTable, Library, Opcode,
+    OpcodeArg,
 };
 
 mod models;
+mod tokenizer;
 
 pub fn disasm_structured(code: Cell) -> Result<Code> {
     let mut stack = Vec::new();
@@ -43,6 +44,7 @@ pub fn disasm_structured(code: Cell) -> Result<Code> {
     // New continuations are collected during the instruction dump
     // and added to the stack afterwards.
     let mut new_conts = Vec::new();
+    let mut links = Vec::new();
 
     'outer: while let Some(item) = stack.last_mut() {
         // Process the topmost continuation.
@@ -78,32 +80,16 @@ pub fn disasm_structured(code: Cell) -> Result<Code> {
                 Err(e) => return Err(e.into()),
             }
 
-            // Start describing the new opcode.
-            let mut opcode = Opcode {
-                bits: cs.offset_bits() - offset_bits,
-                refs: cs.offset_refs() - offset_refs,
-                // TODO: Tokenize opcode text into name and args.
-                text: SmolStr::from(&state.opcode),
-                gas: state.gas,
-                links: Vec::new(),
-            };
-
             // Fill opcode links to cells (as data).
             for cell in state.cells.drain(..) {
                 let id = res.add_cell(cell);
-                opcode.links.push(Link {
-                    to: Some(id),
-                    ty: LinkType::Data,
-                });
+                links.push(id);
             }
 
             // Fill opcode links to slices (as data).
             for slice in state.slices.drain(..) {
                 let id = res.add_slice(slice);
-                opcode.links.push(Link {
-                    to: Some(id),
-                    ty: LinkType::Data,
-                });
+                links.push(id);
             }
 
             // Fill opcode links to continuation references.
@@ -120,10 +106,7 @@ pub fn disasm_structured(code: Cell) -> Result<Code> {
                     Err(id) => id,
                 };
 
-                opcode.links.push(Link {
-                    to: Some(id),
-                    ty: LinkType::Body,
-                });
+                links.push(id);
             }
 
             // Fill opcode links to inline continuations.
@@ -140,10 +123,7 @@ pub fn disasm_structured(code: Cell) -> Result<Code> {
                     Err(id) => id,
                 };
 
-                opcode.links.push(Link {
-                    to: Some(id),
-                    ty: LinkType::Body,
-                });
+                links.push(id);
             }
 
             // Fill opcode links to jump tables.
@@ -160,17 +140,24 @@ pub fn disasm_structured(code: Cell) -> Result<Code> {
                     Err(id) => id,
                 };
 
-                opcode.links.push(Link {
-                    to: Some(id),
-                    ty: LinkType::Body,
-                });
+                links.push(id);
             }
 
+            // Tokenize opcode text.
+            let (name, args) = res.tokenize(&state.opcode, &links)?;
+
             // Add opcode to the code block.
-            item.block.opcodes.push(opcode);
+            item.block.opcodes.push(Opcode {
+                bits: cs.offset_bits() - offset_bits,
+                refs: cs.offset_refs() - offset_refs,
+                name,
+                args,
+                gas: state.gas,
+            });
 
             // Reset `DumpState`.
             state.clear();
+            links.clear();
 
             // Refill the stack with new continuations.
             // NOTE: Reverse order is used here to preserve the resulting total ordering.
@@ -240,6 +227,79 @@ struct Resources {
 }
 
 impl Resources {
+    fn tokenize(&self, text: &str, links: &[ItemId]) -> Result<(SmolStr, Vec<OpcodeArg>)> {
+        use self::tokenizer::{tokenize, OpcodeArgToken, OpcodeTokens};
+
+        let OpcodeTokens { name, args } = tokenize(text)?;
+
+        let mut links = links.iter();
+        let mut res = Vec::with_capacity(args.len());
+        for arg in args {
+            res.push(match arg {
+                OpcodeArgToken::Int(int) => OpcodeArg::Int(int),
+                OpcodeArgToken::Stack { idx } => OpcodeArg::Stack { idx },
+                OpcodeArgToken::Reg { idx } => OpcodeArg::Reg { idx },
+                OpcodeArgToken::Cell => {
+                    let Some(id) = links.next().copied() else {
+                        anyhow::bail!("not enough cell links");
+                    };
+
+                    match self.items.get(id as usize) {
+                        // Accept links to data cells.
+                        Some(Item::Data(DataBlock {
+                            data: Data::Cell(..),
+                        })) => {}
+                        // Accept links to non-inlined continuations.
+                        Some(Item::Code(code)) => {
+                            anyhow::ensure!(
+                                !code.is_inline,
+                                "cell argument points to an inlined continuation"
+                            );
+                        }
+                        // Accept libraries.
+                        Some(Item::Library(..)) => {}
+                        // Reject other types.
+                        Some(_) => anyhow::bail!("invalid link type"),
+                        // Unknown link.
+                        None => anyhow::bail!("unknown link"),
+                    }
+
+                    OpcodeArg::Cell { id }
+                }
+                OpcodeArgToken::Slice => {
+                    let Some(id) = links.next().copied() else {
+                        anyhow::bail!("not enough slice links");
+                    };
+
+                    match self.items.get(id as usize) {
+                        // Accept links to data slices.
+                        Some(Item::Data(DataBlock {
+                            data: Data::Slice(..),
+                        })) => {}
+                        // Accept links to inlined continuations.
+                        Some(Item::Code(code)) => {
+                            anyhow::ensure!(
+                                code.is_inline,
+                                "cell argument points to a non-inlined continuation"
+                            );
+                        }
+                        // Accept links to jump tables.
+                        Some(Item::JumpTable(..)) => {}
+                        // Reject other types.
+                        Some(_) => anyhow::bail!("invalid link type"),
+                        // Unknown link.
+                        None => anyhow::bail!("unknown link"),
+                    }
+
+                    OpcodeArg::Slice { id }
+                }
+            });
+        }
+
+        anyhow::ensure!(links.next().is_none(), "not all links were used");
+        Ok((name, res))
+    }
+
     fn add_cont(&mut self, cont: Cell) -> Result<DumpStackItem, ItemId> {
         if cont.descriptor().is_library() {
             return Err(self.add_library(cont));
@@ -267,7 +327,7 @@ impl Resources {
             hash_map::Entry::Vacant(entry) => {
                 // Insert a stub item to get the new id.
                 let id = add_item(&mut self.items, DataBlock {
-                    data: Cell::default().into(),
+                    data: CellSliceParts::from(Cell::default()).into(),
                 });
                 entry.insert(id);
                 // Create a stack item.
@@ -511,7 +571,8 @@ mod tests {
 
     #[test]
     fn disasm_cell_data() -> Result<()> {
-        let code = Boc::decode(tvmasm!("PUSHREF x{6_}"))?;
+        let code = Boc::decode(tvmasm!("ACCEPT INT 123 PUSHREF x{6_}"))?;
+        println!("{}", Boc::encode_base64(&code));
         let code = disasm_structured(code)?;
         println!("{}", serde_json::to_string_pretty(&code).unwrap());
 

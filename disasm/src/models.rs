@@ -3,6 +3,7 @@ use std::cell::RefCell;
 use base64::prelude::{Engine as _, BASE64_STANDARD};
 use everscale_types::prelude::*;
 use num_bigint::BigInt;
+use serde::ser::SerializeStruct;
 use serde::Serialize;
 use smol_str::SmolStr;
 
@@ -73,23 +74,6 @@ impl JumpTable {
     {
         use serde::ser::SerializeMap;
 
-        #[repr(transparent)]
-        struct DisplayBigInt<'a>(&'a BigInt);
-
-        impl std::fmt::Display for DisplayBigInt<'_> {
-            #[inline]
-            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-                std::fmt::Display::fmt(self.0, f)
-            }
-        }
-
-        impl serde::Serialize for DisplayBigInt<'_> {
-            #[inline]
-            fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-                serializer.collect_str(self)
-            }
-        }
-
         let mut s = serializer.serialize_map(Some(value.len()))?;
         for (key, value) in value {
             s.serialize_entry(&DisplayBigInt(key), value)?;
@@ -153,29 +137,35 @@ pub struct Opcode {
     pub bits: u16,
     #[serde(skip_serializing_if = "is_zero_refs")]
     pub refs: u8,
-    pub text: SmolStr,
-    pub gas: u64,
+    pub name: SmolStr,
     #[serde(skip_serializing_if = "Vec::is_empty")]
-    pub links: Vec<Link>,
+    pub args: Vec<OpcodeArg>,
+    pub gas: u64,
 }
 
 const fn is_zero_refs(refs: &u8) -> bool {
     *refs == 0
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
-pub struct Link {
-    pub to: Option<ItemId>,
-    pub ty: LinkType,
+#[derive(Debug, Clone, Serialize)]
+#[serde(tag = "type")]
+pub enum OpcodeArg {
+    Int(#[serde(serialize_with = "OpcodeArg::serialize_int")] BigInt),
+    Stack { idx: i32 },
+    Reg { idx: u8 },
+    Cell { id: ItemId },
+    Slice { id: ItemId },
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
-pub enum LinkType {
-    True,
-    False,
-    Cond,
-    Body,
-    Data,
+impl OpcodeArg {
+    fn serialize_int<S>(value: &BigInt, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        let mut s = serializer.serialize_struct("Int", 1)?;
+        s.serialize_field("value", &DisplayBigInt(value))?;
+        s.end()
+    }
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -204,8 +194,6 @@ impl Data {
     where
         S: serde::Serializer,
     {
-        use serde::ser::SerializeStruct;
-
         let range = value.0;
         let cs = CellSlice::apply_allow_exotic(value);
         let cell = CellBuilder::build_from(cs).unwrap();
@@ -223,8 +211,6 @@ impl Data {
     where
         S: serde::Serializer,
     {
-        use serde::ser::SerializeStruct;
-
         let mut s = serializer.serialize_struct("Cell", 1)?;
         Self::serialize_with_buffer(value, |data| s.serialize_field("boc", data))?;
         s.end()
@@ -272,5 +258,22 @@ impl Data {
 
             res
         })
+    }
+}
+
+#[repr(transparent)]
+struct DisplayBigInt<'a>(&'a BigInt);
+
+impl std::fmt::Display for DisplayBigInt<'_> {
+    #[inline]
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        std::fmt::Display::fmt(self.0, f)
+    }
+}
+
+impl serde::Serialize for DisplayBigInt<'_> {
+    #[inline]
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.collect_str(self)
     }
 }

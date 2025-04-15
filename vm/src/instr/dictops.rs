@@ -626,7 +626,7 @@ impl DictOps {
         st.code.set_range(code.range());
 
         vm_log_op!(
-            "DICTPUSHCONST {n} ({})",
+            "DICTPUSHCONST {n} {}",
             OwnedCellSlice::from((slice_range, st.code.cell().clone()))
         );
         ok!(stack.push(dict));
@@ -653,7 +653,7 @@ impl DictOps {
 
         f.record_dict(n, slice)?;
         f.record_opcode(&format_args!(
-            "DICTPUSHCONST {n} ({})",
+            "DICTPUSHCONST {n} {}",
             slice.display_as_stack_value()
         ))
     }

@@ -763,10 +763,7 @@ impl CellOps {
         let mut slice = slice_range.apply(st.code.cell())?;
         remove_trailing(&mut slice)?;
 
-        vm_log_op!(
-            "STSLICECONST {}",
-            OwnedCellSlice::from((slice_range, st.code.cell().clone()))
-        );
+        vm_log_op!("STSLICECONST {}", slice.display_as_stack_value());
 
         let stack = SafeRc::make_mut(&mut st.stack);
         let mut builder = ok!(stack.pop_builder());
@@ -1047,7 +1044,7 @@ impl CellOps {
         vm_log_op!(
             "SDBEGINS{} {}",
             if quiet { "Q" } else { "" },
-            OwnedCellSlice::from((slice_range, st.code.cell().clone()))
+            slice.display_as_stack_value()
         );
 
         let stack = SafeRc::make_mut(&mut st.stack);
@@ -1544,10 +1541,10 @@ fn exec_push_slice_common(st: &mut VmState, bits: u16, data_bits: u16, refs: u8)
         slice_range = slice.range();
     }
 
-    let slice = SafeRc::new_dyn_value(OwnedCellSlice::from((slice_range, st.code.cell().clone())));
-    vm_log_op!("PUSHSLICE {}", slice.display_list());
+    let slice = OwnedCellSlice::from((slice_range, st.code.cell().clone()));
+    vm_log_op!("PUSHSLICE {}", slice);
 
-    ok!(SafeRc::make_mut(&mut st.stack).push_raw(slice));
+    ok!(SafeRc::make_mut(&mut st.stack).push(slice));
     Ok(0)
 }
 

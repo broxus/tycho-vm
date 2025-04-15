@@ -69,10 +69,13 @@ impl<'a> CellSliceExt<'a> for CellSlice<'a> {
         impl std::fmt::Display for Display<'_> {
             fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
                 let cs = &self.0;
-                ok!(write!(f, "x{:X}", cs.display_data()));
                 let refs = cs.size_refs();
                 if refs != 0 {
-                    write!(f, ",{refs}")
+                    ok!(write!(f, "("));
+                }
+                ok!(write!(f, "x{:X}", cs.display_data()));
+                if refs != 0 {
+                    write!(f, ",{refs})")
                 } else {
                     Ok(())
                 }
