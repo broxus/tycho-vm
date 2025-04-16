@@ -7,6 +7,8 @@ use serde::ser::SerializeStruct;
 use serde::Serialize;
 use smol_str::SmolStr;
 
+// NOTE: all fields and names must be in `camelCase`!
+
 pub type ItemId = u32;
 
 #[derive(Debug, Clone, Serialize)]
@@ -42,7 +44,7 @@ impl Code {
 }
 
 #[derive(Debug, Clone, Serialize)]
-#[serde(tag = "type")]
+#[serde(tag = "type", rename_all = "camelCase")]
 pub enum Item {
     JumpTable(JumpTable),
     Code(CodeBlock),
@@ -51,6 +53,7 @@ pub enum Item {
 }
 
 #[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct JumpTable {
     pub cell_hash: HashBytes,
     pub key_bits: u16,
@@ -83,6 +86,7 @@ impl JumpTable {
 }
 
 #[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct CodeBlock {
     pub cell_hash: HashBytes,
     pub is_inline: bool,
@@ -102,7 +106,7 @@ impl From<CodeBlock> for Item {
 }
 
 #[derive(Debug, Clone, Serialize)]
-#[serde(tag = "type")]
+#[serde(tag = "type", rename_all = "camelCase")]
 pub enum CodeBlockTail {
     Incomplete,
     Child { id: ItemId },
@@ -148,7 +152,7 @@ const fn is_zero_refs(refs: &u8) -> bool {
 }
 
 #[derive(Debug, Clone, Serialize)]
-#[serde(tag = "type")]
+#[serde(tag = "type", rename_all = "camelCase")]
 pub enum OpcodeArg {
     Int(#[serde(serialize_with = "OpcodeArg::serialize_int")] BigInt),
     Stack { idx: i32 },
@@ -169,7 +173,7 @@ impl OpcodeArg {
 }
 
 #[derive(Debug, Clone, Serialize)]
-#[serde(tag = "type")]
+#[serde(tag = "type", rename_all = "camelCase")]
 pub enum Data {
     Slice(#[serde(serialize_with = "Data::serialize_slice")] CellSliceParts),
     Cell(#[serde(serialize_with = "Data::serialize_cell")] Cell),
@@ -199,8 +203,8 @@ impl Data {
         let cell = CellBuilder::build_from(cs).unwrap();
 
         let mut s = serializer.serialize_struct("CellSlice", 5)?;
-        s.serialize_field("offset_bits", &range.offset_bits())?;
-        s.serialize_field("offset_refs", &range.offset_refs())?;
+        s.serialize_field("offsetBits", &range.offset_bits())?;
+        s.serialize_field("offsetRefs", &range.offset_refs())?;
         s.serialize_field("bits", &range.size_bits())?;
         s.serialize_field("refs", &range.size_refs())?;
         Self::serialize_with_buffer(&cell, |data| s.serialize_field("boc", data))?;
