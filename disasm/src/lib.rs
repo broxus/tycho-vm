@@ -578,4 +578,15 @@ mod tests {
 
         Ok(())
     }
+
+    #[test]
+    fn disasm_elector() -> Result<()> {
+        let code = Boc::decode(include_bytes!("../res/elector_code.boc"))?;
+        let _code = disasm_structured(code)?;
+        // println!("{}", serde_json::to_string_pretty(&code).unwrap());
+
+        // std::fs::write("elector.json", serde_json::to_string_pretty(&code).unwrap()).unwrap();
+
+        Ok(())
+    }
 }

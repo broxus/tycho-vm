@@ -454,6 +454,11 @@ mod tests {
     #[test]
     #[traced_test]
     fn blkdrop2() {
+        assert_run_vm!(
+            "XCHG s3, s5",
+            [int 1, int 2, int 3, int 4, int 5, int 6] => [int 3, int 2, int 1, int 4, int 5, int 6]
+        );
+
         assert_run_vm!("BLKDROP2 3, 0", [int 1, int 2, int 3, int 4, int 5, int 6] => [int 1, int 2, int 3]);
         assert_run_vm!(
             r#"

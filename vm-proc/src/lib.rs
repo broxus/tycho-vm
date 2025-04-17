@@ -519,7 +519,7 @@ fn process_instr_definition(
             {
                 let dump_cond = instr.cond.map(|cond| {
                     quote! {
-                        if !#cond {
+                        if crate::__private::not(#cond) {
                             return Err(::tycho_vm::error::DumpError::InvalidOpcode);
                         }
                     }
