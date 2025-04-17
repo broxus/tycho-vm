@@ -118,7 +118,7 @@ impl StackOps {
     // XCHG XCHG XCHG -> 540ijk exec_xchg3
 
     // XCHG XCHG PUSH
-    #[op(code = "541ijk", fmt = "XC2PU")]
+    #[op(code = "541ijk", fmt = "XC2PU s{i},s{j},s{k}")]
     fn exec_xc2pu(st: &mut VmState, i: u32, j: u32, k: u32) -> VmResult<i32> {
         let stack = SafeRc::make_mut(&mut st.stack);
         ok!(stack.swap(1, i as _));
