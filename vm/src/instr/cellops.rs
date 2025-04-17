@@ -17,7 +17,7 @@ use crate::error::{VmError, VmResult};
 use crate::saferc::SafeRc;
 use crate::stack::{Stack, StackValue};
 use crate::state::VmState;
-#[cfg(feature = "dump")]
+#[cfg(any(feature = "dump", feature = "tracing"))]
 use crate::util::CellSliceExt;
 use crate::util::{bitsize, load_int_from_slice, remove_trailing, OwnedCellSlice};
 
