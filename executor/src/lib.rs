@@ -308,7 +308,7 @@ impl<'a> ExecutorState<'a> {
 }
 
 /// Executor configuration parameters.
-#[derive(Default)]
+#[derive(Default, Clone)]
 pub struct ExecutorParams {
     /// Public libraries from the referenced masterchain state.
     pub libraries: Dict<HashBytes, LibDescr>,
