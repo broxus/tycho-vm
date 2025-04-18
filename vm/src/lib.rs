@@ -172,6 +172,8 @@ pub use self::error::{DumpError, DumpResult};
 pub use self::error::{VmError, VmException, VmResult};
 pub use self::gas::{GasConsumer, GasParams, LibraryProvider, NoLibraries};
 pub use self::instr::{codepage, codepage0};
+#[cfg(feature = "tracing")]
+pub use self::log::{VmLogRows, VmLogRowsGuard, VmLogSubscriber, VM_LOG_TARGET};
 pub use self::saferc::{SafeDelete, SafeRc, SafeRcMakeMut};
 pub use self::smc_info::{
     CustomSmcInfo, SmcInfo, SmcInfoBase, SmcInfoTonV4, SmcInfoTonV6, UnpackedConfig, VmVersion,

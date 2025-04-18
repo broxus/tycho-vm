@@ -148,6 +148,7 @@ pub fn ensure_empty_slice(slice: &CellSlice) -> Result<(), Error> {
     }
 }
 
+/// Loads `bits`-width int from the slice.
 pub fn load_int_from_slice(
     slice: &mut CellSlice<'_>,
     bits: u16,
@@ -181,6 +182,7 @@ pub fn load_int_from_slice(
     }
 }
 
+/// Stores `bits`-width int to the builder.
 pub fn store_int_to_builder(
     x: &BigInt,
     bits: u16,

@@ -308,6 +308,11 @@ impl<'a> VmState<'a> {
                 vm_log_gas_remaining!(self.gas.remaining());
             }
 
+            #[cfg(feature = "tracing")]
+            if self.modifiers.log_mask.contains(VmLogMask::GAS_CONSUMED) {
+                vm_log_gas_consumed!(self.gas.consumed());
+            }
+
             res = match step_res {
                 Ok(res) => res,
                 Err(e) if e.is_out_of_gas() => {
@@ -908,10 +913,11 @@ bitflags! {
         const DUMP_STACK = 1 << 1;
         const EXEC_LOCATION = 1 << 2;
         const GAS_REMAINING = 1 << 3;
-        const DUMP_STACK_VERBOSE = 1 << 4;
-        const DUMP_C5 = 32;
+        const GAS_CONSUMED = 1 << 4;
+        const DUMP_STACK_VERBOSE = 1 << 5;
+        const DUMP_C5 = 1 << 6;
 
-        const FULL = 0b11111;
+        const FULL = 0b111111;
     }
 }
 
