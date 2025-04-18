@@ -1,6 +1,3 @@
-use std::cell::RefCell;
-
-use base64::prelude::{Engine as _, BASE64_STANDARD};
 use everscale_types::prelude::*;
 use num_bigint::BigInt;
 use serde::ser::SerializeStruct;
@@ -125,8 +122,9 @@ impl From<DataBlock> for Item {
 }
 
 #[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct Library {
-    pub hash: HashBytes,
+    pub cell_hash: HashBytes,
 }
 
 impl From<Library> for Item {
@@ -199,15 +197,13 @@ impl Data {
         S: serde::Serializer,
     {
         let range = value.0;
-        let cs = CellSlice::apply_allow_exotic(value);
-        let cell = CellBuilder::build_from(cs).unwrap();
 
         let mut s = serializer.serialize_struct("CellSlice", 5)?;
+        s.serialize_field("cellHash", value.1.repr_hash())?;
         s.serialize_field("offsetBits", &range.offset_bits())?;
         s.serialize_field("offsetRefs", &range.offset_refs())?;
         s.serialize_field("bits", &range.size_bits())?;
         s.serialize_field("refs", &range.size_refs())?;
-        Self::serialize_with_buffer(&cell, |data| s.serialize_field("boc", data))?;
         s.end()
     }
 
@@ -216,52 +212,8 @@ impl Data {
         S: serde::Serializer,
     {
         let mut s = serializer.serialize_struct("Cell", 1)?;
-        Self::serialize_with_buffer(value, |data| s.serialize_field("boc", data))?;
+        s.serialize_field("cellHash", value.repr_hash())?;
         s.end()
-    }
-
-    fn serialize_with_buffer<F, R>(cell: &Cell, f: F) -> R
-    where
-        F: FnOnce(&str) -> R,
-    {
-        use everscale_types::boc::ser::BocHeader;
-
-        struct Buffers {
-            bytes: Vec<u8>,
-            base64: String,
-        }
-
-        thread_local! {
-            static BUFFERS: RefCell<Buffers> = const {
-                RefCell::new(Buffers {
-                    bytes: Vec::new(),
-                    base64: String::new(),
-                })
-            };
-        }
-
-        const MAX_OK_SIZE: usize = 10 << 10; // 10 KB
-
-        BUFFERS.with_borrow_mut(|buffers| {
-            BocHeader::<ahash::RandomState>::with_root(cell.as_ref()).encode(&mut buffers.bytes);
-
-            BASE64_STANDARD.encode_string(&buffers.bytes, &mut buffers.base64);
-            let res = f(&buffers.base64);
-
-            if buffers.bytes.len() <= MAX_OK_SIZE {
-                buffers.bytes.clear();
-            } else {
-                std::mem::take(&mut buffers.bytes);
-            }
-
-            if buffers.base64.len() <= MAX_OK_SIZE {
-                buffers.base64.clear();
-            } else {
-                std::mem::take(&mut buffers.base64);
-            }
-
-            res
-        })
     }
 }
 

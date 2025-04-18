@@ -10,8 +10,6 @@ license.workspace = true
 [dependencies]
 ahash = { workspace = true }
 anyhow = { workspace = true }
-base64 = { workspace = true }
-bumpalo = { workspace = true }
 everscale-types = { workspace = true, default-features = false, features = ["serde", "base64"] }
 num-bigint = { workspace = true }
 serde = { workspace = true, features = ["derive"] }

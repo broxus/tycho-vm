@@ -407,7 +407,7 @@ impl Resources {
         *self
             .lib_to_id
             .entry(hash)
-            .or_insert_with(|| add_item(&mut self.items, Library { hash }))
+            .or_insert_with(|| add_item(&mut self.items, Library { cell_hash: hash }))
     }
 }
 
