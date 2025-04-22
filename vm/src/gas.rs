@@ -9,9 +9,10 @@ use everscale_types::error::Error;
 use everscale_types::models::{LibDescr, SimpleLib};
 use everscale_types::prelude::*;
 
+use crate::error::VmResult;
 use crate::saferc::SafeRc;
 use crate::stack::Stack;
-use crate::OwnedCellSlice;
+use crate::util::OwnedCellSlice;
 
 /// Initialization params for [`GasConsumer`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -27,12 +28,14 @@ pub struct GasParams {
 }
 
 impl GasParams {
+    pub const MAX_GAS: u64 = i64::MAX as u64;
+
     const STUB_GAS_PRICE: u64 = 1000 << 16;
 
     pub const fn unlimited() -> Self {
         Self {
-            max: u64::MAX,
-            limit: u64::MAX,
+            max: Self::MAX_GAS,
+            limit: Self::MAX_GAS,
             credit: 0,
             price: Self::STUB_GAS_PRICE,
         }
@@ -290,7 +293,7 @@ pub struct GasConsumer<'l> {
     /// Initial gas to compute the consumed amount.
     gas_base: std::cell::Cell<u64>,
     /// Remaining gas available.
-    gas_remaining: std::cell::Cell<u64>,
+    gas_remaining: std::cell::Cell<i64>,
     /// Gas price (fixed point with 16 bits for fractional part).
     gas_price: NonZeroU64,
 
@@ -322,6 +325,7 @@ impl<'l> GasConsumer<'l> {
     pub const IMPLICIT_JMPREF_GAS_PRICE: u64 = 10;
     pub const IMPLICIT_RET_GAS_PRICE: u64 = 5;
     pub const EXCEPTION_GAS_PRICE: u64 = 50;
+    pub const RUNVM_GAS_PRICE: u64 = 40;
 
     pub fn new(params: GasParams) -> Self {
         static NO_LIBRARIES: NoLibraries = NoLibraries;
@@ -330,20 +334,82 @@ impl<'l> GasConsumer<'l> {
     }
 
     pub fn with_libraries(params: GasParams, libraries: &'l dyn LibraryProvider) -> Self {
-        let gas_remaining = params.limit.saturating_add(params.credit);
+        let gas_remaining = truncate_gas(params.limit.saturating_add(params.credit));
 
         Self {
             gas_max: params.max,
-            gas_limit: std::cell::Cell::new(params.limit),
+            gas_limit: std::cell::Cell::new(truncate_gas(params.limit)),
             gas_credit: std::cell::Cell::new(params.credit),
             gas_base: std::cell::Cell::new(gas_remaining),
-            gas_remaining: std::cell::Cell::new(gas_remaining),
+            gas_remaining: std::cell::Cell::new(gas_remaining as i64),
             gas_price: NonZeroU64::new(params.price).unwrap_or(NonZeroU64::MIN),
             loaded_cells: Default::default(),
             libraries,
             chksign_counter: std::cell::Cell::new(0),
             missing_library: std::cell::Cell::new(None),
         }
+    }
+
+    // TODO: Consume free gas as non-free when `isolate`.
+    pub fn derive(&mut self, params: GasConsumerDeriveParams) -> VmResult<ParentGasConsumer<'l>> {
+        Ok(if params.isolate {
+            let remaining_gas = self.remaining();
+            vm_ensure!(remaining_gas >= 0, OutOfGas);
+
+            let params = GasParams {
+                max: std::cmp::min(params.gas_max, remaining_gas as u64),
+                limit: std::cmp::min(params.gas_limit, remaining_gas as u64),
+                credit: 0,
+                price: self.price(),
+            };
+            let libraries = self.libraries;
+
+            ParentGasConsumer::Isolated(std::mem::replace(
+                self,
+                Self::with_libraries(params, libraries),
+            ))
+        } else {
+            ParentGasConsumer::Shared(GasConsumer {
+                gas_max: self.gas_max,
+                gas_limit: self.gas_limit.clone(),
+                gas_credit: self.gas_credit.clone(),
+                gas_base: self.gas_base.clone(),
+                gas_remaining: self.gas_remaining.clone(),
+                gas_price: self.gas_price,
+                loaded_cells: std::cell::UnsafeCell::new(std::mem::take(
+                    self.loaded_cells.get_mut(),
+                )),
+                libraries: self.libraries,
+                chksign_counter: self.chksign_counter.clone(),
+                missing_library: self.missing_library.clone(),
+            })
+        })
+    }
+
+    pub fn restore(&mut self, parent: ParentGasConsumer<'l>) -> RestoredGasConsumer {
+        let meta = RestoredGasConsumer {
+            gas_consumed: self.consumed(),
+            gas_limit: self.limit(),
+        };
+
+        match parent {
+            ParentGasConsumer::Isolated(mut parent) | ParentGasConsumer::Shared(mut parent) => {
+                // Merge missing library.
+                let missing_lib = self.missing_library.get_mut();
+                let parent_lib = parent.missing_library.get_mut();
+                if parent_lib.is_none() && missing_lib.is_some() {
+                    *parent_lib = *missing_lib;
+                }
+
+                // Merge free gas counters.
+                parent.chksign_counter = self.chksign_counter.clone();
+                // TODO: Merge free gas.
+
+                *self = parent
+            }
+        }
+
+        meta
     }
 
     pub fn libraries(&self) -> &'l dyn LibraryProvider {
@@ -355,10 +421,10 @@ impl<'l> GasConsumer<'l> {
     }
 
     pub fn consumed(&self) -> u64 {
-        self.gas_base.get() - self.gas_remaining.get()
+        (self.gas_base.get() as i64).saturating_sub(self.gas_remaining.get()) as u64
     }
 
-    pub fn remaining(&self) -> u64 {
+    pub fn remaining(&self) -> i64 {
         self.gas_remaining.get()
     }
 
@@ -379,16 +445,10 @@ impl<'l> GasConsumer<'l> {
         self.set_base(limit);
     }
 
-    fn set_base(&self, base: u64) {
-        let prev_base = self.gas_base.get();
-        let prev_remaining = self.gas_remaining.get();
-        self.gas_remaining.set(if base >= prev_base {
-            let base_diff = base - prev_base;
-            prev_remaining + base_diff
-        } else {
-            let base_diff = prev_base - base;
-            prev_remaining - base_diff
-        });
+    fn set_base(&self, mut base: u64) {
+        base = truncate_gas(base);
+        let diff = base as i64 - self.gas_base.get() as i64;
+        self.gas_remaining.set(self.gas_remaining.get() + diff);
         self.gas_base.set(base);
     }
 
@@ -436,8 +496,13 @@ impl<'l> GasConsumer<'l> {
     }
 
     pub fn try_consume(&self, amount: u64) -> Result<(), Error> {
-        if let Some(remaining) = self.gas_remaining.get().checked_sub(amount) {
-            self.gas_remaining.set(remaining);
+        let remaining = self
+            .gas_remaining
+            .get()
+            .saturating_sub(truncate_gas(amount) as i64);
+        self.gas_remaining.set(remaining);
+
+        if remaining >= 0 {
             Ok(())
         } else {
             Err(Error::Cancelled)
@@ -547,6 +612,35 @@ impl LoadLibrary<'_> for Cell {
         Self: Sized,
     {
         gas.libraries.find(library_hash)
+    }
+}
+
+/// Params to replace the current gas consumer.
+#[derive(Debug, Clone, Copy)]
+pub struct GasConsumerDeriveParams {
+    pub gas_max: u64,
+    pub gas_limit: u64,
+    pub isolate: bool,
+}
+
+/// Parent of the derived gas consumer.
+pub enum ParentGasConsumer<'l> {
+    Isolated(GasConsumer<'l>),
+    Shared(GasConsumer<'l>),
+}
+
+/// Info extracted when parent gas consumer is restored.
+#[derive(Debug, Clone, Copy)]
+pub struct RestoredGasConsumer {
+    pub gas_consumed: u64,
+    pub gas_limit: u64,
+}
+
+const fn truncate_gas(gas: u64) -> u64 {
+    if gas <= i64::MAX as u64 {
+        gas
+    } else {
+        i64::MAX as u64
     }
 }
 

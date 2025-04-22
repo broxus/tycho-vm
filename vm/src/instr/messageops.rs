@@ -736,7 +736,7 @@ mod tests {
 
         let result = !vm_state.run();
         assert_eq!(result, 104);
-        assert!(vm_state.commited_state.is_none());
+        assert!(vm_state.committed_state.is_none());
         assert_eq!(vm_state.gas.credit(), 10000);
 
         println!("code {result}");

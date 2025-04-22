@@ -63,7 +63,7 @@ pub struct ComputePhaseFull {
     pub compute_phase: ComputePhase,
     /// Whether the inbound message was accepted.
     ///
-    /// NOTE: Message can be accepted even without a commited state,
+    /// NOTE: Message can be accepted even without a committed state,
     /// so we can't use [`ExecutedComputePhase::success`].
     pub accepted: bool,
     /// Original account balance before this phase.
@@ -302,7 +302,7 @@ impl ExecutorState<'_> {
             "internal messages must be accepted"
         );
 
-        let success = res.accepted && vm.commited_state.is_some();
+        let success = res.accepted && vm.committed_state.is_some();
 
         let gas_used = std::cmp::min(vm.gas.consumed(), vm.gas.limit());
         let gas_fees = if res.accepted && !self.is_special {
@@ -320,10 +320,10 @@ impl ExecutorState<'_> {
             self.end_status = AccountStatus::Active;
         }
 
-        if let Some(commited) = vm.commited_state {
+        if let Some(committed) = vm.committed_state {
             if res.accepted {
-                res.new_state.data = Some(commited.c4);
-                res.actions = commited.c5;
+                res.new_state.data = Some(committed.c4);
+                res.actions = committed.c5;
 
                 // Set inspector actions.
                 if let Some(actions) = inspector_actions {
