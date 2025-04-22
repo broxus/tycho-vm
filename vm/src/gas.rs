@@ -306,6 +306,8 @@ pub struct GasConsumer<'l> {
     chksign_counter: std::cell::Cell<usize>,
     /// Free gas (can be paid when using isolated consumer).
     free_gas_consumed: std::cell::Cell<u64>,
+    /// Number of balance calls with cheap gas consumer
+    get_extra_balance_counter: std::cell::Cell<usize>,
 
     // Missing library in case of resolving error occured.
     missing_library: std::cell::Cell<Option<HashBytes>>,
@@ -318,6 +320,8 @@ impl<'l> GasConsumer<'l> {
 
     pub const FREE_STACK_DEPTH: usize = 32;
     pub const FREE_SIGNATURE_CHECKS: usize = 10;
+    pub const CHEAP_GET_BALANCE_CALLS: usize = 5;
+    pub const CHEAP_GET_BALANCE_GAS_THRESHOLD: u64 = 200;
     pub const FREE_NESTED_CONT_JUMP: usize = 8;
 
     pub const STACK_VALUE_GAS_PRICE: u64 = 1;
@@ -349,7 +353,15 @@ impl<'l> GasConsumer<'l> {
             libraries,
             chksign_counter: std::cell::Cell::new(0),
             free_gas_consumed: std::cell::Cell::new(0),
+            get_extra_balance_counter: std::cell::Cell::new(0),
             missing_library: std::cell::Cell::new(None),
+        }
+    }
+
+    pub fn limited(&'l self, remaining: u64) -> LimitedGasConsumer<'l> {
+        LimitedGasConsumer::<'l> {
+            gas: self,
+            remaining: std::cell::Cell::new(remaining),
         }
     }
 
@@ -369,6 +381,7 @@ impl<'l> GasConsumer<'l> {
             // Reset current free gas counters.
             self.chksign_counter.set(0);
             self.free_gas_consumed.set(0);
+            self.get_extra_balance_counter.set(0);
 
             // Create a new gas consumer.
             let params = GasParams {
@@ -408,6 +421,7 @@ impl<'l> GasConsumer<'l> {
                 libraries: self.libraries,
                 chksign_counter: self.chksign_counter.clone(),
                 free_gas_consumed: self.free_gas_consumed.clone(),
+                get_extra_balance_counter: self.get_extra_balance_counter.clone(),
                 missing_library: self.missing_library.clone(),
             })
         })
@@ -436,6 +450,7 @@ impl<'l> GasConsumer<'l> {
                 // Merge free gas counters.
                 parent.chksign_counter = self.chksign_counter.clone();
                 parent.free_gas_consumed = self.free_gas_consumed.clone();
+                parent.get_extra_balance_counter = self.get_extra_balance_counter.clone();
 
                 *self = parent
             }
@@ -486,6 +501,16 @@ impl<'l> GasConsumer<'l> {
 
     pub fn price(&self) -> u64 {
         self.gas_price.get()
+    }
+
+    pub fn try_get_extra_balance_consumer(&'l self) -> Option<LimitedGasConsumer<'l>> {
+        self.get_extra_balance_counter
+            .set(self.get_extra_balance_counter.get() + 1);
+        if self.get_extra_balance_counter.get() <= Self::CHEAP_GET_BALANCE_CALLS {
+            return Some(self.limited(Self::CHEAP_GET_BALANCE_GAS_THRESHOLD));
+        }
+
+        None
     }
 
     pub fn try_consume_exception_gas(&self) -> Result<(), Error> {
@@ -627,6 +652,101 @@ impl CellContext for GasConsumer<'_> {
         mode: LoadMode,
     ) -> Result<&'a DynCell, Error> {
         self.load_cell_impl(cell, mode)
+    }
+}
+
+/// Consumes at most N gas units, everything else is treated as free gas.
+pub struct LimitedGasConsumer<'l> {
+    /// Main gas consumer
+    gas: &'l GasConsumer<'l>,
+    /// Remaining gas that can be consumed.
+    remaining: std::cell::Cell<u64>,
+}
+
+impl CellContext for LimitedGasConsumer<'_> {
+    fn finalize_cell(&self, _: CellParts<'_>) -> Result<Cell, Error> {
+        panic!("limited gas consumer must not be used for making new cells")
+    }
+
+    fn load_cell(&self, cell: Cell, mode: LoadMode) -> Result<Cell, Error> {
+        self.load_cell_impl(cell, mode)
+    }
+
+    fn load_dyn_cell<'s: 'a, 'a>(
+        &'s self,
+        cell: &'a DynCell,
+        mode: LoadMode,
+    ) -> Result<&'a DynCell, Error> {
+        self.load_cell_impl(cell, mode)
+    }
+}
+
+impl LimitedGasConsumer<'_> {
+    fn load_cell_impl<'s: 'a, 'a, T: LoadLibrary<'a>>(
+        &'s self,
+        mut cell: T,
+        mode: LoadMode,
+    ) -> Result<T, Error> {
+        let mut library_loaded = false;
+        loop {
+            if mode.use_gas() {
+                // SAFETY: This is the only place where we borrow `loaded_cells` as mut.
+                let is_new =
+                    unsafe { (*self.gas.loaded_cells.get()).insert(*cell.as_ref().repr_hash()) };
+
+                ok!(self.try_consume(if is_new {
+                    GasConsumer::NEW_CELL_GAS
+                } else {
+                    GasConsumer::OLD_CELL_GAS
+                }));
+            }
+
+            if !mode.resolve() {
+                return Ok(cell);
+            }
+
+            match cell.as_ref().cell_type() {
+                CellType::Ordinary => return Ok(cell),
+                CellType::LibraryReference if !library_loaded => {
+                    // Library data structure is enforced by `CellContext::finalize_cell`.
+                    debug_assert_eq!(cell.as_ref().bit_len(), 8 + 256);
+
+                    // Find library by hash.
+                    let mut library_hash = HashBytes::ZERO;
+                    ok!(cell
+                        .as_ref()
+                        .as_slice_allow_exotic()
+                        .get_raw(8, &mut library_hash.0, 256));
+
+                    let Some(library_cell) = ok!(T::load_library(self.gas, &library_hash)) else {
+                        self.gas.missing_library.set(Some(library_hash));
+                        return Err(Error::CellUnderflow);
+                    };
+
+                    cell = library_cell;
+                    library_loaded = true;
+                }
+                _ => return Err(Error::CellUnderflow),
+            }
+        }
+    }
+
+    pub fn try_consume(&self, mut amount: u64) -> Result<(), Error> {
+        amount = truncate_gas(amount);
+
+        let mut remaining = self.remaining.get();
+        let consumed = std::cmp::min(amount, remaining);
+
+        self.gas.try_consume(consumed)?;
+
+        remaining -= consumed;
+        self.remaining.set(remaining);
+
+        // threshold reached
+        if remaining == 0 {
+            self.gas.consume_free_gas(amount - consumed);
+        }
+        Ok(())
     }
 }
 

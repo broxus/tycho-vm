@@ -185,11 +185,16 @@ impl MessageOps {
             None => 1 << 13,
         };
         let mut stats = {
-            let mut st = StorageStat::with_limit(max_cells as _);
+            let mut stats = StorageStat::with_limit(max_cells as _);
             let mut cs = msg_cell.as_slice()?;
             cs.skip_first(cs.size_bits(), 0).ok();
-            st.add_slice(&cs);
-            st.stats()
+
+            if st.version.is_ton(10..) && has_extra_currencies {
+                cs.skip_first(0, 1).ok(); // skip extra currency
+            }
+
+            stats.add_slice(&cs);
+            stats.stats()
         };
 
         // Adjust outgoing message value and extra currencies.
@@ -197,12 +202,16 @@ impl MessageOps {
             if mode.contains(SendMsgFlags::ALL_BALANCE) {
                 let balance = ok!(t1.try_get_ref::<Tuple>(SmcInfoBase::BALANCE_IDX));
                 value = ok!(balance.try_get_ref::<BigInt>(0).and_then(bigint_to_tokens));
-                has_extra_currencies = balance.get(1).and_then(|v| v.as_cell()).is_some();
+                if st.version.is_ton(..10) {
+                    has_extra_currencies = balance.get(1).and_then(|v| v.as_cell()).is_some();
+                }
             } else if mode.contains(SendMsgFlags::WITH_REMAINING_BALANCE) {
                 let balance = ok!(t1.try_get_ref::<Tuple>(SmcInfoTonV4::IN_MSG_VALUE_IDX));
                 let msg_value = ok!(balance.try_get_ref::<BigInt>(0).and_then(bigint_to_tokens));
                 value.try_add_assign(msg_value)?;
-                has_extra_currencies |= balance.get(1).and_then(|v| v.as_cell()).is_some();
+                if st.version.is_ton(..10) {
+                    has_extra_currencies |= balance.get(1).and_then(|v| v.as_cell()).is_some();
+                }
             }
         }
 

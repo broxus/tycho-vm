@@ -178,8 +178,8 @@ pub use self::dispatch::{
 pub use self::error::{DumpError, DumpResult};
 pub use self::error::{VmError, VmException, VmResult};
 pub use self::gas::{
-    GasConsumer, GasConsumerDeriveParams, GasParams, LibraryProvider, NoLibraries,
-    ParentGasConsumer, RestoredGasConsumer,
+    GasConsumer, GasConsumerDeriveParams, GasParams, LibraryProvider, LimitedGasConsumer,
+    NoLibraries, ParentGasConsumer, RestoredGasConsumer,
 };
 pub use self::instr::{codepage, codepage0};
 #[cfg(feature = "tracing")]
@@ -289,10 +289,6 @@ mod tests {
                 limit: gas_limit,
                 credit: 0,
                 ..GasParams::getter()
-            })
-            .with_modifiers(BehaviourModifiers {
-                log_mask: VmLogMask::MESSAGE | VmLogMask::GAS_CONSUMED,
-                ..Default::default()
             })
             .build();
 
