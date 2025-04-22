@@ -14,7 +14,7 @@ use crate::saferc::SafeRc;
 use crate::smc_info::{SmcInfoBase, SmcInfoTonV4, SmcInfoTonV6};
 use crate::stack::{RcStackValue, Stack, TupleExt};
 use crate::state::VmState;
-use crate::util::{shift_ceil_price, store_int_to_builder, OwnedCellSlice};
+use crate::util::{load_varint, shift_ceil_price, store_int_to_builder, OwnedCellSlice};
 
 pub struct ConfigOps;
 
@@ -266,6 +266,37 @@ impl ConfigOps {
         Ok(0)
     }
 
+    #[op(code = "f880", fmt = "GETEXTRABALANCE")]
+    fn exec_get_extra_currency_balance(st: &mut VmState) -> VmResult<i32> {
+        ok!(st.version.require_ton(10..));
+
+        let stack = SafeRc::make_mut(&mut st.stack);
+        let id = ok!(stack.pop_smallint_range(0, u32::MAX));
+
+        let t1 = ok!(st.cr.get_c7_params());
+        let balance = ok!(t1.try_get_tuple_range(SmcInfoBase::BALANCE_IDX, 0..=255));
+        let extra_currency = balance.get(1).and_then(|v| v.as_cell()).cloned();
+        let balance = RawDict::<32>::from(extra_currency);
+
+        let mut key_builder = CellBuilder::new();
+        key_builder.store_u32(id).ok();
+
+        let cheap_consumer = st.gas.try_get_extra_balance_consumer();
+        let gas_context: &dyn CellContext = match &cheap_consumer {
+            Some(cheap_consumer) => cheap_consumer,
+            None => &st.gas,
+        };
+
+        let value_opt = balance.get_ext(key_builder.as_data_slice(), gas_context)?;
+        if let Some(mut value) = value_opt {
+            let result = load_varint(&mut value, 5, false)?;
+            ok!(stack.push_int(result));
+        } else {
+            ok!(stack.push_zero());
+        }
+        Ok(0)
+    }
+
     #[op(code = "f840", fmt = "GETGLOBVAR")]
     fn exec_get_global_var(st: &mut VmState) -> VmResult<i32> {
         let stack = SafeRc::make_mut(&mut st.stack);
@@ -377,3 +408,73 @@ fn get_parsed_config(regs: &ControlRegs) -> VmResult<&[RcStackValue]> {
 }
 
 const CONFIG_KEY_BITS: u16 = 32;
+
+#[cfg(test)]
+mod test {
+    use everscale_types::boc::Boc;
+    use everscale_types::dict::Dict;
+    use everscale_types::models::{CurrencyCollection, ExtraCurrencyCollection};
+    use everscale_types::num::VarUint248;
+    use tracing_test::traced_test;
+
+    use crate::{SmcInfoBase, VmState};
+
+    #[test]
+    #[traced_test]
+    pub fn balance_test() -> anyhow::Result<()> {
+        let mut dict = Dict::<u32, VarUint248>::new();
+        dict.set(1, VarUint248::new(2))?;
+
+        let c7 = tuple![[
+            null,                                   // 0
+            null,                                   // 1
+            null,                                   // 2
+            null,                                   // 3
+            null,                                   // 4
+            null,                                   // 5
+            null,                                   // 6
+            [null, cell dict.into_root().unwrap()], // balance
+        ]];
+        assert_run_vm!("GETEXTRABALANCE", c7: c7.clone(), [int 1] => [int 2]);
+        Ok(())
+    }
+
+    #[test]
+    #[traced_test]
+    pub fn balance_gas_test() -> anyhow::Result<()> {
+        let mut dict = Dict::<u32, VarUint248>::new();
+        for i in 1..20 {
+            dict.set(i, VarUint248::new(i as _))?;
+        }
+
+        let code = Boc::decode(tvmasm!("GETEXTRABALANCE"))?;
+
+        let stack = tuple![int 10];
+        let mut output = crate::tests::TracingOutput::default();
+        let mut state = VmState::builder()
+            .with_stack(stack)
+            .with_smc_info(SmcInfoBase {
+                now: 0,
+                block_lt: 0,
+                tx_lt: 0,
+                rand_seed: Default::default(),
+                account_balance: CurrencyCollection {
+                    tokens: Default::default(),
+                    other: ExtraCurrencyCollection::from_raw(dict.into_root()),
+                },
+                addr: Default::default(),
+                config: None,
+            })
+            .with_version(crate::VmVersion::LATEST_TON)
+            .with_code(code)
+            .with_debug(&mut output)
+            .build();
+
+        let result = !state.run();
+
+        assert_eq!(state.gas.consumed(), 231);
+        assert_eq!(result, 0);
+
+        Ok(())
+    }
+}

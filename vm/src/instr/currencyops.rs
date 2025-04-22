@@ -8,10 +8,11 @@ use tycho_vm_proc::vm_module;
 use crate::error::VmResult;
 use crate::gas::GasConsumer;
 use crate::saferc::SafeRc;
+use crate::smc_info::VmVersion;
 use crate::stack::{RcStackValue, Stack, StackValue, Tuple};
 use crate::state::VmState;
 use crate::util::{
-    bitsize, load_int_from_slice, load_uint_leq, store_int_to_builder_unchecked, OwnedCellSlice,
+    bitsize, load_uint_leq, load_varint, store_int_to_builder_unchecked, OwnedCellSlice,
 };
 
 pub struct CurrencyOps;
@@ -62,7 +63,7 @@ impl CurrencyOps {
 
         let mut cs = csr.apply();
         let mut addr = cs;
-        match skip_message_addr(&mut cs) {
+        match skip_message_addr(&mut cs, &st.version) {
             Ok(()) => {
                 addr.skip_last(cs.size_bits(), cs.size_refs())?;
                 let addr_cs = OwnedCellSlice::from((addr.range(), csr.cell().clone()));
@@ -92,7 +93,7 @@ impl CurrencyOps {
         let csr = ok!(stack.pop_cs());
 
         let mut range = csr.range();
-        match parse_message_addr(csr.cell(), &mut range) {
+        match parse_message_addr(csr.cell(), &mut range, &st.version) {
             Ok(parts) => {
                 ok!(stack.push(parts.into_tuple()));
                 if quiet {
@@ -123,7 +124,7 @@ impl CurrencyOps {
         let csr = ok!(stack.pop_cs());
 
         let mut range = csr.range();
-        let parts = match parse_message_addr(csr.cell(), &mut range) {
+        let parts = match parse_message_addr(csr.cell(), &mut range, &st.version) {
             Ok(parts) => parts,
             Err(e) => return handle_error(stack, e),
         };
@@ -212,7 +213,11 @@ fn rewrite_addr_std(addr: OwnedCellSlice, pfx: Option<OwnedCellSlice>) -> Result
     Ok(BigInt::from_bytes_be(Sign::Plus, &addr))
 }
 
-fn parse_message_addr(cell: &Cell, range: &mut CellSliceRange) -> Result<AddrParts, Error> {
+fn parse_message_addr(
+    cell: &Cell,
+    range: &mut CellSliceRange,
+    version: &VmVersion,
+) -> Result<AddrParts, Error> {
     let mut cs = range.apply(cell)?;
     match cs.load_small_uint(2)? {
         // addr_none$00 = MsgAddressExt;
@@ -231,7 +236,7 @@ fn parse_message_addr(cell: &Cell, range: &mut CellSliceRange) -> Result<AddrPar
         // addr_std$10
         0b10 => {
             // anycast:(Maybe Anycast)
-            let pfx = parse_maybe_anycast(cell, &mut cs)?;
+            let pfx = parse_maybe_anycast(cell, &mut cs, version)?;
             // workchain_id:int8
             let workchain = cs.load_u8()? as i8;
             // address:bits256 = MsgAddressInt;
@@ -245,8 +250,11 @@ fn parse_message_addr(cell: &Cell, range: &mut CellSliceRange) -> Result<AddrPar
         }
         // addr_var$11
         0b11 => {
+            if version.is_ton(10..) {
+                return Err(Error::InvalidCell);
+            }
             // anycast:(Maybe Anycast)
-            let pfx = parse_maybe_anycast(cell, &mut cs)?;
+            let pfx = parse_maybe_anycast(cell, &mut cs, version)?;
             // addr_len:(## 9)
             let len = cs.load_uint(9)? as u16;
             // workchain_id:int32
@@ -267,9 +275,13 @@ fn parse_message_addr(cell: &Cell, range: &mut CellSliceRange) -> Result<AddrPar
 fn parse_maybe_anycast(
     cell: &Cell,
     cs: &mut CellSlice<'_>,
+    version: &VmVersion,
 ) -> Result<Option<OwnedCellSlice>, Error> {
     // just$1
     Ok(if cs.load_bit()? {
+        if version.is_ton(10..) {
+            return Err(Error::InvalidCell);
+        }
         // anycast_info$_ depth:(#<= 30)
         let depth = SplitDepth::new(load_uint_leq(cs, 30)? as u8)?;
         // rewrite_pfx:(bits depth) = Anycast;
@@ -334,7 +346,7 @@ impl AddrParts {
     }
 }
 
-fn skip_message_addr(cs: &mut CellSlice) -> Result<(), Error> {
+fn skip_message_addr(cs: &mut CellSlice, version: &VmVersion) -> Result<(), Error> {
     match cs.load_small_uint(2)? {
         // addr_none$00 = MsgAddressExt;
         0b00 => Ok(()),
@@ -348,15 +360,18 @@ fn skip_message_addr(cs: &mut CellSlice) -> Result<(), Error> {
         // addr_std$10
         0b10 => {
             // anycast:(Maybe Anycast)
-            skip_maybe_anycast(cs)?;
+            skip_maybe_anycast(cs, version)?;
             // workchain_id:int8 address:bits256 = MsgAddressInt;
             cs.skip_first(8 + 256, 0)?;
             Ok(())
         }
         // addr_var$11
         0b11 => {
+            if version.is_ton(10..) {
+                return Err(Error::InvalidCell);
+            }
             // anycast:(Maybe Anycast)
-            skip_maybe_anycast(cs)?;
+            skip_maybe_anycast(cs, version)?;
             // addr_len:(## 9)
             let len = cs.load_uint(9)? as u16;
             // workchain_id:int32 address:(bits addr_len) = MsgAddressInt;
@@ -366,9 +381,12 @@ fn skip_message_addr(cs: &mut CellSlice) -> Result<(), Error> {
     }
 }
 
-fn skip_maybe_anycast(cs: &mut CellSlice) -> Result<(), Error> {
+fn skip_maybe_anycast(cs: &mut CellSlice, version: &VmVersion) -> Result<(), Error> {
     // just$1
     if cs.load_bit()? {
+        if version.is_ton(10..) {
+            return Err(Error::InvalidCell);
+        }
         // anycast_info$_ depth:(#<= 30)
         let depth = SplitDepth::new(load_uint_leq(cs, 30)? as u8)?;
         // rewrite_pfx:(bits depth) = Anycast;
@@ -395,14 +413,9 @@ fn store_varint(
     Ok(())
 }
 
-fn load_varint(slice: &mut CellSlice<'_>, len_bits: u16, signed: bool) -> Result<BigInt, Error> {
-    let len = slice.load_uint(len_bits)? as u16;
-    load_int_from_slice(slice, len * 8, signed)
-}
-
 #[cfg(test)]
 mod test {
-    use everscale_types::models::StdAddr;
+    use everscale_types::models::{Anycast, StdAddr};
     use tracing_test::traced_test;
 
     use super::*;
@@ -465,6 +478,24 @@ mod test {
 
         assert_run_vm!("PARSEMSGADDR", [raw value.clone()] => [raw tuple.clone()]);
         assert_run_vm!("PARSEMSGADDRQ", [raw value.clone()] => [raw tuple, int -1]);
+
+        Ok(())
+    }
+
+    #[test]
+    #[traced_test]
+    fn test_anycast_error() -> anyhow::Result<()> {
+        let mut addr = "0:6301b2c75596e6e569a6d13ae4ec70c94f177ece0be19f968ddce73d44e7afc7"
+            .parse::<StdAddr>()?;
+        addr.anycast = Some(Box::new(Anycast {
+            depth: SplitDepth::MIN,
+            rewrite_prefix: vec![],
+        }));
+        let addr = OwnedCellSlice::new_allow_exotic(CellBuilder::build_from(addr)?);
+        let value = SafeRc::new_dyn_value(addr.clone());
+
+        assert_run_vm!("PARSEMSGADDR", [raw value.clone()] => [int 0], exit_code: 12);
+        assert_run_vm!("PARSEMSGADDRQ", [raw value.clone()] => [int 0]);
 
         Ok(())
     }

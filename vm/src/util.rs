@@ -148,6 +148,15 @@ pub fn ensure_empty_slice(slice: &CellSlice) -> Result<(), Error> {
     }
 }
 
+pub fn load_varint(
+    slice: &mut CellSlice<'_>,
+    len_bits: u16,
+    signed: bool,
+) -> Result<BigInt, Error> {
+    let len = slice.load_uint(len_bits)? as u16;
+    load_int_from_slice(slice, len * 8, signed)
+}
+
 /// Loads `bits`-width int from the slice.
 pub fn load_int_from_slice(
     slice: &mut CellSlice<'_>,
