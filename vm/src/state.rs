@@ -12,7 +12,7 @@ use crate::cont::{
 };
 use crate::dispatch::DispatchTable;
 use crate::error::{VmException, VmResult};
-use crate::gas::{GasConsumer, GasParams, LibraryProvider, NoLibraries};
+use crate::gas::{GasConsumer, GasParams, LibraryProvider, NoLibraries, ParentGasConsumer};
 use crate::instr::{codepage, codepage0};
 use crate::saferc::SafeRc;
 use crate::smc_info::{SmcInfo, VmVersion};
@@ -52,7 +52,7 @@ impl<'a> VmStateBuilder<'a> {
         };
 
         let c3 = match self.init_selector {
-            InitSelectorParams::None => RcCont::from(QuitCont { exit_code: 11 }),
+            InitSelectorParams::None => QUIT11.with(SafeRc::clone).into_dyn_cont(),
             InitSelectorParams::UseCode { push0 } => {
                 if push0 {
                     vm_log_trace!("implicit PUSH 0 at start");
@@ -81,7 +81,7 @@ impl<'a> VmStateBuilder<'a> {
             code,
             throw_on_code_access,
             stack: self.stack,
-            commited_state: None,
+            committed_state: None,
             steps: 0,
             quit0,
             quit1,
@@ -90,6 +90,7 @@ impl<'a> VmStateBuilder<'a> {
             debug: self.debug,
             modifiers: self.modifiers,
             version: self.version.unwrap_or(VmState::DEFAULT_VERSION),
+            parent: None,
         }
     }
 
@@ -213,7 +214,7 @@ pub struct VmState<'a> {
     pub throw_on_code_access: bool,
     pub stack: SafeRc<Stack>,
     pub cr: ControlRegs,
-    pub commited_state: Option<CommitedState>,
+    pub committed_state: Option<CommittedState>,
     pub steps: u64,
     pub quit0: SafeRc<QuitCont>,
     pub quit1: SafeRc<QuitCont>,
@@ -222,6 +223,41 @@ pub struct VmState<'a> {
     pub debug: Option<&'a mut dyn std::fmt::Write>,
     pub modifiers: BehaviourModifiers,
     pub version: VmVersion,
+    pub parent: Option<Box<ParentVmState<'a>>>,
+}
+
+/// Parent execution state.
+pub struct ParentVmState<'a> {
+    /// Parent code slice.
+    pub code: OwnedCellSlice,
+    /// Parent stack.
+    pub stack: SafeRc<Stack>,
+    /// Parent control registers.
+    pub cr: ControlRegs,
+    /// Parent committed state.
+    pub committed_state: Option<CommittedState>,
+    /// Parent VM steps.
+    pub steps: u64,
+    /// Parent c0 continuation.
+    pub quit0: SafeRc<QuitCont>,
+    /// Parent c1 continuation.
+    pub quit1: SafeRc<QuitCont>,
+    /// Gas to restore.
+    pub gas: ParentGasConsumer<'a>,
+    /// Parent codepage.
+    pub cp: &'static DispatchTable,
+
+    /// Push child c4 when restoring this state.
+    pub return_data: bool,
+    /// Push child c5 when restoring this state.
+    pub return_actions: bool,
+    /// Number of return values.
+    ///
+    /// `None` means that child stack will be merged with the parent.
+    pub return_values: Option<u32>,
+
+    /// Previous parent.
+    pub parent: Option<Box<ParentVmState<'a>>>,
 }
 
 impl<'a> VmState<'a> {
@@ -300,6 +336,29 @@ impl<'a> VmState<'a> {
         }
 
         let mut res = 0;
+        loop {
+            res = match self.restore_parent(!res) {
+                Ok(()) => self.run_inner(),
+                Err(OutOfGas) => {
+                    self.steps += 1;
+                    self.throw_out_of_gas()
+                }
+            };
+
+            if self.parent.is_none() {
+                #[cfg(feature = "tracing")]
+                if self.modifiers.log_mask.contains(VmLogMask::DUMP_C5) {
+                    if let Some(committed) = &self.committed_state {
+                        vm_log_c5!(committed.c5.as_ref());
+                    }
+                }
+                break res;
+            }
+        }
+    }
+
+    fn run_inner(&mut self) -> i32 {
+        let mut res = 0;
         while res == 0 {
             let step_res = self.step();
 
@@ -348,13 +407,6 @@ impl<'a> VmState<'a> {
             return VmException::CellOverflow.as_exit_code();
         }
 
-        #[cfg(feature = "tracing")]
-        if self.modifiers.log_mask.contains(VmLogMask::DUMP_C5) {
-            if let Some(commited) = &self.commited_state {
-                vm_log_c5!(commited.c5.as_ref());
-            }
-        }
-
         res
     }
 
@@ -365,7 +417,7 @@ impl<'a> VmState<'a> {
                 && c4.repr_depth() <= Self::MAX_DATA_DEPTH
                 && c5.repr_depth() <= Self::MAX_DATA_DEPTH
             {
-                self.commited_state = Some(CommitedState {
+                self.committed_state = Some(CommittedState {
                     c4: c4.clone(),
                     c5: c5.clone(),
                 });
@@ -892,7 +944,94 @@ impl<'a> VmState<'a> {
         };
         Ok(cont)
     }
+
+    fn restore_parent(&mut self, mut res: i32) -> Result<(), OutOfGas> {
+        let Some(parent) = self.parent.take() else {
+            return Ok(());
+        };
+
+        // Restore all values first.
+        self.code = parent.code;
+        let child_stack = std::mem::replace(&mut self.stack, parent.stack);
+        self.cr = parent.cr;
+        let child_committed_state =
+            std::mem::replace(&mut self.committed_state, parent.committed_state);
+        self.steps += parent.steps;
+        self.quit0 = parent.quit0;
+        self.quit1 = parent.quit1;
+        let return_gas = matches!(&parent.gas, ParentGasConsumer::Isolated(_));
+        let child_gas = self.gas.restore(parent.gas);
+        self.cp = parent.cp;
+        self.parent = parent.parent;
+
+        // === Apply child VM results to the restored state ===
+
+        // NOTE: Stack overflow errors are ignored here because it is impossible
+        //       to handle them properly here.
+        // TODO: Somehow handle stack overflow errors. What should we do in that case?
+
+        // Consume isolated gas by the parent gas consumer.
+        let amount = std::cmp::min(
+            child_gas.gas_consumed,
+            child_gas.gas_limit.saturating_add(1),
+        );
+        if self.gas.try_consume(amount).is_err() {
+            return Err(OutOfGas);
+        }
+
+        let stack = SafeRc::make_mut(&mut self.stack);
+        let stack = &mut stack.items;
+
+        let returned_values = parent.return_values;
+        let returned_values = if res == 0 || res == 1 {
+            match returned_values {
+                Some(n) if child_stack.depth() < n as usize => {
+                    res = VmException::StackUnderflow.as_exit_code();
+                    stack.push(Stack::make_zero());
+                    0
+                }
+                Some(n) => n as usize,
+                None => child_stack.depth(),
+            }
+        } else {
+            std::cmp::min(child_stack.depth(), 1)
+        };
+
+        let gas = &mut self.gas;
+        if gas.try_consume_stack_depth_gas(returned_values).is_err() {
+            return Err(OutOfGas);
+        }
+
+        stack.extend_from_slice(&child_stack.items[child_stack.depth() - returned_values..]);
+
+        stack.push(SafeRc::new_dyn_value(BigInt::from(res)));
+
+        let (committed_c4, committed_c5) = match child_committed_state {
+            Some(CommittedState { c4, c5 }) => (Some(c4), Some(c5)),
+            None => (None, None),
+        };
+        if parent.return_data {
+            stack.push(match committed_c4 {
+                None => Stack::make_null(),
+                Some(cell) => SafeRc::new_dyn_value(cell),
+            })
+        }
+        if parent.return_actions {
+            stack.push(match committed_c5 {
+                None => Stack::make_null(),
+                Some(cell) => SafeRc::new_dyn_value(cell),
+            })
+        }
+
+        if return_gas {
+            stack.push(SafeRc::new_dyn_value(BigInt::from(child_gas.gas_consumed)));
+        }
+
+        Ok(())
+    }
 }
+
+struct OutOfGas;
 
 /// Falgs to control VM behaviour.
 #[derive(Default, Debug, Clone, Copy)]
@@ -922,7 +1061,7 @@ bitflags! {
 }
 
 /// Execution effects.
-pub struct CommitedState {
+pub struct CommittedState {
     /// Contract data.
     pub c4: Cell,
     /// Result action list.
@@ -944,7 +1083,8 @@ bitflags! {
 }
 
 thread_local! {
-    static QUIT0: SafeRc<QuitCont> = SafeRc::new(QuitCont { exit_code: 0 });
-    static QUIT1: SafeRc<QuitCont> = SafeRc::new(QuitCont { exit_code: 1 });
-    static EXC_QUIT: SafeRc<ExcQuitCont> = SafeRc::new(ExcQuitCont);
+    pub(crate) static QUIT0: SafeRc<QuitCont> = SafeRc::new(QuitCont { exit_code: 0 });
+    pub(crate) static QUIT1: SafeRc<QuitCont> = SafeRc::new(QuitCont { exit_code: 1 });
+    pub(crate) static QUIT11: SafeRc<QuitCont> = SafeRc::new(QuitCont { exit_code: 11 });
+    pub(crate) static EXC_QUIT: SafeRc<ExcQuitCont> = SafeRc::new(ExcQuitCont);
 }

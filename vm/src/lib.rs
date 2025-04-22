@@ -170,13 +170,17 @@ pub use self::dispatch::{
 #[cfg(feature = "dump")]
 pub use self::error::{DumpError, DumpResult};
 pub use self::error::{VmError, VmException, VmResult};
-pub use self::gas::{GasConsumer, GasParams, LibraryProvider, NoLibraries};
+pub use self::gas::{
+    GasConsumer, GasConsumerDeriveParams, GasParams, LibraryProvider, NoLibraries,
+    ParentGasConsumer, RestoredGasConsumer,
+};
 pub use self::instr::{codepage, codepage0};
 #[cfg(feature = "tracing")]
 pub use self::log::{VmLogRows, VmLogRowsGuard, VmLogSubscriber, VM_LOG_TARGET};
 pub use self::saferc::{SafeDelete, SafeRc, SafeRcMakeMut};
 pub use self::smc_info::{
-    CustomSmcInfo, SmcInfo, SmcInfoBase, SmcInfoTonV4, SmcInfoTonV6, UnpackedConfig, VmVersion,
+    CustomSmcInfo, SmcInfo, SmcInfoBase, SmcInfoTonV4, SmcInfoTonV6, SmcInfoTonV9, UnpackedConfig,
+    VmVersion,
 };
 pub use self::stack::{
     NaN, RcStackValue, Stack, StackValue, StackValueType, StaticStackValue, Tuple, TupleExt,
@@ -184,8 +188,8 @@ pub use self::stack::{
 #[cfg(feature = "tracing")]
 pub use self::state::VmLogMask;
 pub use self::state::{
-    BehaviourModifiers, CommitedState, InitSelectorParams, IntoCode, SaveCr, VmState,
-    VmStateBuilder,
+    BehaviourModifiers, CommittedState, InitSelectorParams, IntoCode, ParentVmState, SaveCr,
+    VmState, VmStateBuilder,
 };
 pub use self::util::{load_int_from_slice, store_int_to_builder, OwnedCellSlice};
 

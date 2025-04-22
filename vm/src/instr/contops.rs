@@ -7,9 +7,11 @@ use crate::dispatch::DumpOutput;
 use crate::error::VmResult;
 #[cfg(feature = "dump")]
 use crate::error::{DumpError, DumpResult};
+use crate::gas::{GasConsumer, GasConsumerDeriveParams};
+use crate::instr::codepage0;
 use crate::saferc::SafeRc;
 use crate::stack::{Stack, StackValueType};
-use crate::state::{SaveCr, VmState};
+use crate::state::{ParentVmState, SaveCr, VmState, EXC_QUIT, QUIT0, QUIT1, QUIT11};
 
 pub struct ContOps;
 
@@ -186,6 +188,17 @@ impl ContOps {
     fn exec_ret_data(st: &mut VmState) -> VmResult<i32> {
         ok!(SafeRc::make_mut(&mut st.stack).push(st.code.clone()));
         st.ret()
+    }
+
+    #[op(code = "db4xxx", fmt = "RUNVM {x}")]
+    fn exec_runvm(st: &mut VmState, x: u32) -> VmResult<i32> {
+        exec_runvm_common(st, RunVmArgs(x))
+    }
+
+    #[op(code = "db50", fmt = "RUNVMX")]
+    fn exec_runvmx(st: &mut VmState) -> VmResult<i32> {
+        let x = ok!(SafeRc::make_mut(&mut st.stack).pop_smallint_range(0, 0xfff));
+        exec_runvm_common(st, RunVmArgs(x))
     }
 
     // === Conditions and loops ===
@@ -1404,6 +1417,166 @@ impl std::fmt::Display for ThrowAnyArgs {
 
         write!(f, "THROW{arg}ANY{cond}")
     }
+}
+
+#[derive(Clone, Copy)]
+struct RunVmArgs(u32);
+
+impl RunVmArgs {
+    /// +1 = same_c3 (set c3 to code).
+    const fn same_c3(self) -> bool {
+        self.0 & 0b000000001 != 0
+    }
+
+    /// +2 = push_0 (push an implicit 0 before running the code).
+    const fn push_0(self) -> bool {
+        self.0 & 0b000000010 != 0
+    }
+
+    /// +4 = load c4 (persistent data) from stack and return its final value.
+    const fn load_c4(self) -> bool {
+        self.0 & 0b000000100 != 0
+    }
+
+    /// +8 = load gas limit from stack and return consumed gas.
+    const fn load_gas(self) -> bool {
+        self.0 & 0b000001000 != 0
+    }
+
+    /// +16 = load c7 (smart-contract context).
+    const fn load_c7(self) -> bool {
+        self.0 & 0b000010000 != 0
+    }
+
+    /// +32 = return c5 (actions).
+    const fn return_c5(self) -> bool {
+        self.0 & 0b000100000 != 0
+    }
+
+    /// +64 = pop hard gas limit (enabled by ACCEPT) from stack as well.
+    const fn load_hard_gas_limit(self) -> bool {
+        self.0 & 0b001000000 != 0
+    }
+
+    /// +128 = isolated gas consumption (separate set of visited cells, reset chksgn counter).
+    const fn isolate_gas(self) -> bool {
+        self.0 & 0b010000000 != 0
+    }
+
+    /// +256 = pop number N, return exactly N values from stack
+    /// (only if res=0 or 1; if not enough then res=stk_und).
+    const fn ret_n(self) -> bool {
+        self.0 & 0b100000000 != 0
+    }
+}
+
+fn exec_runvm_common(st: &mut VmState, args: RunVmArgs) -> VmResult<i32> {
+    // Check possible args range (all other bits are reserved for future).
+    vm_ensure!(args.0 < 512, IntegerOutOfRange {
+        min: 0,
+        max: 511,
+        actual: args.0.to_string()
+    });
+
+    // Compensate vm creation.
+    st.gas.try_consume(GasConsumer::RUNVM_GAS_PRICE)?;
+
+    // Read args from the stack.
+    let stack = SafeRc::make_mut(&mut st.stack);
+
+    let mut gas_max = if args.load_hard_gas_limit() {
+        ok!(stack.pop_long_range(0, u64::MAX))
+    } else {
+        u64::MAX
+    };
+    let gas_limit = if args.load_gas() {
+        ok!(stack.pop_long_range(0, u64::MAX))
+    } else {
+        u64::MAX
+    };
+
+    if args.load_hard_gas_limit() {
+        gas_max = std::cmp::min(gas_max, gas_limit);
+    } else {
+        gas_max = gas_limit;
+    }
+
+    let child_c7 = if args.load_c7() {
+        ok!(stack.pop_tuple())
+    } else {
+        SafeRc::new(Vec::new())
+    };
+
+    let child_data = if args.load_c4() {
+        SafeRc::unwrap_or_clone(ok!(stack.pop_cell()))
+    } else {
+        Cell::default()
+    };
+
+    let return_values = if args.ret_n() {
+        Some(ok!(stack.pop_smallint_range(0, 1 << 30)))
+    } else {
+        None
+    };
+
+    let child_code = SafeRc::unwrap_or_clone(ok!(stack.pop_cs()));
+    let stack_size = ok!(stack.pop_long_range(0, stack.depth().saturating_sub(1) as u64));
+    let mut child_stack = ok!(stack.split_top(stack_size as usize));
+    st.gas.try_consume_stack_gas(Some(&child_stack))?;
+
+    // Build child VM state.
+
+    let parent_gas = ok!(st.gas.derive(GasConsumerDeriveParams {
+        gas_max,
+        gas_limit,
+        isolate: args.isolate_gas(),
+    }));
+
+    // === ↓↓↓ Must not return any error afterwards ↓↓↓ ===
+
+    let child_quit0 = QUIT0.with(SafeRc::clone);
+    let child_quit1 = QUIT1.with(SafeRc::clone);
+    let child_cp = codepage0();
+    let child_c3 = if args.same_c3() {
+        if args.push_0() {
+            vm_log_trace!("implicit PUSH 0 at start");
+            SafeRc::make_mut(&mut child_stack)
+                .items
+                .push(Stack::make_zero());
+        }
+        SafeRc::from(OrdCont::simple(child_code.clone(), child_cp.id()))
+    } else {
+        QUIT11.with(SafeRc::clone).into_dyn_cont()
+    };
+
+    let child_cr = ControlRegs {
+        c: [
+            Some(child_quit0.clone().into_dyn_cont()),
+            Some(child_quit1.clone().into_dyn_cont()),
+            Some(EXC_QUIT.with(SafeRc::clone).into_dyn_cont()),
+            Some(child_c3),
+        ],
+        d: [Some(child_data), Some(Cell::empty_cell())],
+        c7: Some(child_c7),
+    };
+
+    st.parent = Some(Box::new(ParentVmState {
+        code: std::mem::replace(&mut st.code, child_code),
+        stack: std::mem::replace(&mut st.stack, child_stack),
+        cr: std::mem::replace(&mut st.cr, child_cr),
+        committed_state: std::mem::take(&mut st.committed_state),
+        steps: std::mem::take(&mut st.steps),
+        quit0: std::mem::replace(&mut st.quit0, child_quit0),
+        quit1: std::mem::replace(&mut st.quit1, child_quit1),
+        gas: parent_gas,
+        cp: std::mem::replace(&mut st.cp, child_cp),
+        return_data: args.load_c4(),
+        return_actions: args.return_c5(),
+        return_values,
+        parent: st.parent.take(),
+    }));
+
+    Ok(0)
 }
 
 #[cfg(test)]

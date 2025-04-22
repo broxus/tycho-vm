@@ -547,7 +547,7 @@ mod tests {
             throw_on_code_access: false,
             stack: Default::default(),
             cr: Default::default(),
-            commited_state: Default::default(),
+            committed_state: Default::default(),
             steps: 0,
             quit0: SafeRc::from(QuitCont { exit_code: 0 }),
             quit1: SafeRc::from(QuitCont { exit_code: 0 }),
@@ -556,6 +556,7 @@ mod tests {
             debug: None,
             modifiers: Default::default(),
             version: VmVersion::LATEST_TON,
+            parent: None,
         };
 
         let dummy = state.cp.lookup(0x800000);

@@ -78,7 +78,7 @@ impl<'a> Executor<'a> {
         is_external: bool,
         msg: M,
         state: &'s ShardAccount,
-    ) -> TxResult<UncommitedTransaction<'a, 's>>
+    ) -> TxResult<UncommittedTransaction<'a, 's>>
     where
         M: LoadMessage,
     {
@@ -92,7 +92,7 @@ impl<'a> Executor<'a> {
         msg: M,
         state: &'s ShardAccount,
         inspector: Option<&mut ExecutorInspector<'_>>,
-    ) -> TxResult<UncommitedTransaction<'a, 's>>
+    ) -> TxResult<UncommittedTransaction<'a, 's>>
     where
         M: LoadMessage,
     {
@@ -102,7 +102,7 @@ impl<'a> Executor<'a> {
         let mut exec = self.begin(address, account)?;
         let info = exec.run_ordinary_transaction(is_external, msg_root.clone(), inspector)?;
 
-        UncommitedTransaction::with_info(exec, state, Some(msg_root), info).map_err(TxError::Fatal)
+        UncommittedTransaction::with_info(exec, state, Some(msg_root), info).map_err(TxError::Fatal)
     }
 
     #[inline]
@@ -111,7 +111,7 @@ impl<'a> Executor<'a> {
         address: &StdAddr,
         kind: TickTock,
         state: &'s ShardAccount,
-    ) -> TxResult<UncommitedTransaction<'a, 's>> {
+    ) -> TxResult<UncommittedTransaction<'a, 's>> {
         self.begin_tick_tock_ext(address, kind, state, None)
     }
 
@@ -121,12 +121,12 @@ impl<'a> Executor<'a> {
         kind: TickTock,
         state: &'s ShardAccount,
         inspector: Option<&mut ExecutorInspector<'_>>,
-    ) -> TxResult<UncommitedTransaction<'a, 's>> {
+    ) -> TxResult<UncommittedTransaction<'a, 's>> {
         let account = state.load_account()?;
         let mut exec = self.begin(address, account)?;
         let info = exec.run_tick_tock_transaction(kind, inspector)?;
 
-        UncommitedTransaction::with_info(exec, state, None, info).map_err(TxError::Fatal)
+        UncommittedTransaction::with_info(exec, state, None, info).map_err(TxError::Fatal)
     }
 
     pub fn begin(&self, address: &StdAddr, account: Option<Account>) -> Result<ExecutorState<'a>> {
@@ -334,7 +334,7 @@ pub struct ExecutorParams {
 }
 
 /// Executed transaction.
-pub struct UncommitedTransaction<'a, 's> {
+pub struct UncommittedTransaction<'a, 's> {
     original: &'s ShardAccount,
     exec: ExecutorState<'a>,
     in_msg: Option<Cell>,
@@ -346,7 +346,7 @@ struct BriefTxInfo {
     gas_used: u64,
 }
 
-impl<'a, 's> UncommitedTransaction<'a, 's> {
+impl<'a, 's> UncommittedTransaction<'a, 's> {
     #[inline]
     pub fn with_info(
         exec: ExecutorState<'a>,
@@ -382,7 +382,7 @@ impl<'a, 's> UncommitedTransaction<'a, 's> {
     ///
     /// It differs from the normal transaction by having a stub `state_update`
     /// and possibly denormalized `end_status`.
-    pub fn build_uncommited(&self) -> Result<Transaction, Error> {
+    pub fn build_uncommitted(&self) -> Result<Transaction, Error> {
         thread_local! {
             static EMPTY_STATE_UPDATE: Lazy<HashUpdate> = Lazy::new(&HashUpdate {
                 old: HashBytes::ZERO,
@@ -630,7 +630,7 @@ fn compute_storage_used(
     })
 }
 
-/// Commited transaction output.
+/// Committed transaction output.
 #[derive(Clone, Debug)]
 pub struct ExecutorOutput {
     pub new_state: ShardAccount,
