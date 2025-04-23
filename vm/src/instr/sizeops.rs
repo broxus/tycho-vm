@@ -237,13 +237,13 @@ mod tests {
         let huge_cell = make_huge_cell(&mut rand::thread_rng(), 10);
         assert_run_vm!("CDATASIZE", [cell huge_cell.clone(), int 2048] => [int 2047, int 524032, int 2046]);
         assert_run_vm!("CDATASIZEQ", [cell huge_cell.clone(), int 100] => [int 0]);
-        assert_run_vm!("CDATASIZE", gas: 10000, [cell huge_cell.clone(), int 2048] => [int 9926], exit_code: -14);
-        assert_run_vm!("CDATASIZEQ", gas: 10000, [cell huge_cell.clone(), int 2048] => [int 9926], exit_code: -14);
+        assert_run_vm!("CDATASIZE", gas: 10000, [cell huge_cell.clone(), int 2048] => [int 10026], exit_code: -14);
+        assert_run_vm!("CDATASIZEQ", gas: 10000, [cell huge_cell.clone(), int 2048] => [int 10026], exit_code: -14);
 
         let huge_slice = OwnedCellSlice::new_allow_exotic(huge_cell);
         assert_run_vm!("SDATASIZE", [slice huge_slice.clone(), int 2048] => [int 2046, int 524032, int 2046]);
         assert_run_vm!("SDATASIZEQ", [slice huge_slice.clone(), int 100] => [int 0]);
-        assert_run_vm!("SDATASIZE", gas: 10000, [slice huge_slice.clone(), int 2048] => [int 9926], exit_code: -14);
-        assert_run_vm!("SDATASIZEQ", gas: 10000, [slice huge_slice.clone(), int 2048] => [int 9926], exit_code: -14);
+        assert_run_vm!("SDATASIZE", gas: 10000, [slice huge_slice.clone(), int 2048] => [int 10026], exit_code: -14);
+        assert_run_vm!("SDATASIZEQ", gas: 10000, [slice huge_slice.clone(), int 2048] => [int 10026], exit_code: -14);
     }
 }
