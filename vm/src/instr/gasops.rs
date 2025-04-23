@@ -110,8 +110,11 @@ fn exec_set_gas(st: &mut VmState, gas_limit: u64) -> VmResult<i32> {
 
 #[cfg(test)]
 mod tests {
+    use everscale_types::boc::Boc;
     use num_bigint::BigInt;
     use tracing_test::traced_test;
+
+    use crate::IntoCode;
 
     #[test]
     #[traced_test]
@@ -156,5 +159,26 @@ mod tests {
         assert_run_vm!("GASTOGRAM", [int -1] => [int -1000]);
         assert_run_vm!("GASTOGRAM", [int u64::MAX] => [int (u64::MAX as u128) * 1000]);
         assert_run_vm!("GASTOGRAM", [int (BigInt::from(1) << 256) - 1] => [int 0], exit_code: 4);
+    }
+
+    #[test]
+    #[traced_test]
+    fn gas_stats() {
+        assert_run_vm!("INT 10 INT 20 ADD DROP GASCONSUMED", [] => [int 106]);
+
+        // GASCONSUMED inside RUNVM
+        let child_code = Boc::decode(tvmasm!("INT 10 INT 20 ADD DROP GASCONSUMED"))
+            .unwrap()
+            .into_code()
+            .unwrap();
+
+        assert_run_vm!(
+            r#"
+            INT 100 INT 200 INT 300 MUL DIV DROP
+            RUNVM 0
+            GASCONSUMED
+            "#,
+            [int 0, slice child_code] => [int 106, int 0, int 367],
+        );
     }
 }

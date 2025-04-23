@@ -119,6 +119,13 @@ macro_rules! assert_run_vm {
             &libs,
             &mut output,
         );
+
+        vm_log_trace!(
+            "test vm finished: res={exit_code}, steps={}, gas={}",
+            vm.steps,
+            vm.gas.consumed(),
+        );
+
         $crate::assert_run_vm!(@check_exit_code exit_code $($exit_code)?);
 
         let expected_stack = $crate::tuple![$($expected_stack)*];
@@ -282,6 +289,10 @@ mod tests {
                 limit: gas_limit,
                 credit: 0,
                 ..GasParams::getter()
+            })
+            .with_modifiers(BehaviourModifiers {
+                log_mask: VmLogMask::MESSAGE | VmLogMask::GAS_CONSUMED,
+                ..Default::default()
             })
             .build();
 
