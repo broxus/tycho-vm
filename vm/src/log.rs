@@ -131,7 +131,7 @@ mod subscriber {
     ///     // ...run vm...
     /// }
     /// println!("{}", log_rows);
-    /// #}
+    /// # }
     /// ```
     pub struct VmLogSubscriber {
         vm_log_mask: VmLogMask,

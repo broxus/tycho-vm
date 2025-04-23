@@ -2206,7 +2206,7 @@ mod tests {
             DUP
             EXECUTE
             "#,
-            [] => [int 999990],
+            [] => [int 1000008],
             exit_code: -14,
         );
     }
@@ -2219,7 +2219,7 @@ mod tests {
             AGAINEND
             SAVEBOTHCTR c0
             "#,
-            [] => [int 999985],
+            [] => [int 1000011],
             exit_code: -14,
         );
     }
@@ -2237,7 +2237,7 @@ mod tests {
             AGAINEND
             DEPTH
             "#,
-            [] => [int 999997],
+            [] => [int 1000015],
             exit_code: -14,
         );
     }
@@ -2254,7 +2254,7 @@ mod tests {
             AGAINEND
             @inline x{8a}
             "#,
-            [] => [int 999952],
+            [] => [int 1000002],
             exit_code: -14,
         );
     }
@@ -2307,7 +2307,7 @@ mod tests {
             DUP
             EXECUTE
             "#,
-            [] => [int 999997],
+            [] => [int 1000015],
             exit_code: -14,
         );
     }
@@ -2326,7 +2326,7 @@ mod tests {
             DUP
             EXECUTE
             "#,
-            [] => [int 999985],
+            [] => [int 1000011],
             exit_code: -14,
         );
     }
