@@ -1496,7 +1496,7 @@ fn exec_runvm_common(st: &mut VmState, args: RunVmArgs) -> VmResult<i32> {
     };
 
     if args.load_hard_gas_limit() {
-        gas_max = std::cmp::min(gas_max, gas_limit);
+        gas_max = std::cmp::max(gas_max, gas_limit);
     } else {
         gas_max = gas_limit;
     }
@@ -1572,6 +1572,7 @@ fn exec_runvm_common(st: &mut VmState, args: RunVmArgs) -> VmResult<i32> {
         cp: std::mem::replace(&mut st.cp, child_cp),
         return_data: args.load_c4(),
         return_actions: args.return_c5(),
+        return_gas: args.load_gas(),
         return_values,
         parent: st.parent.take(),
     }));
@@ -2195,6 +2196,459 @@ mod tests {
     }
 
     #[test]
+    #[traced_test]
+    fn runvm_simple() {
+        let child_code = make_code(tvmasm!(
+            r#"
+            ADD
+            DEPTH
+            PUSH c4 CTOS SBITREFS
+            PUSH c5 CTOS SBITREFS
+            PUSH c7
+            PUSHREF x{99991111} POP c4
+            PUSHREF x{aaaabbbb} POP c5
+
+            NIL
+            INT 100
+            TPUSH
+            INT 200
+            TPUSH
+            POP c7
+
+            INT 123
+            "#
+        ));
+
+        assert_run_vm!(
+            r#"
+            PUSHREF x{1234} POP c4
+            PUSHREF x{5678} POP c5
+            NIL
+            INT 5
+            TPUSH
+            INT 6
+            TPUSH
+            POP c7
+
+            RUNVM 0
+
+            PUSH c4 CTOS
+            PUSH c5 CTOS
+            PUSH c7
+            "#,
+            [int 111, int 10, int 20, int 2, slice child_code] => [
+                int 111,
+                int 30,
+                int 1,
+                int 0,
+                int 0,
+                int 0,
+                int 0,
+                [],
+                int 123,
+                int 0,
+                slice make_slice(0x1234_u16),
+                slice make_slice(0x5678_u16),
+                [int 5, int 6],
+            ],
+        );
+    }
+
+    #[test]
+    #[traced_test]
+    fn runvm_exception() {
+        // === Simple exception ===
+
+        let child_code = make_code(tvmasm!(
+            r#"
+            INT 22
+            INT 55 THROWARG 66
+            "#
+        ));
+
+        assert_run_vm!(
+            "RUNVM 0",
+            [int 111, int 10, int 20, int 2, slice child_code] => [
+                int 111,
+                int 55,
+                int 66,
+            ],
+        );
+
+        // === c4, c5 with exception ===
+
+        let child_code = make_code(tvmasm!(
+            r#"
+            PUSHREF x{abcdaaaa} POP c4
+            PUSHREF x{abcdbbbb} POP c5
+            THROW 55
+            "#,
+        ));
+
+        assert_run_vm!(
+            r#"
+            PUSHREF x{1234aaaa} POP c4
+            PUSHREF x{1234bbbb} POP c5
+            RUNVM 36
+            PUSH c4 CTOS
+            PUSH c5 CTOS
+            "#,
+            [int 0, slice child_code, cell make_cell(0x5678_u16)] => [
+                int 0,
+                int 55,
+                null,
+                null,
+                slice make_slice(0x1234aaaa_u32),
+                slice make_slice(0x1234bbbb_u32),
+            ],
+        );
+
+        // === c4, c5 with exception and commit ===
+
+        let child_code = make_code(tvmasm!(
+            r#"
+            PUSHREF x{abcdaaaa} POP c4
+            PUSHREF x{abcdbbbb} POP c5
+            COMMIT
+            PUSHREF x{} POP c4
+            @newcell
+            PUSHREF x{} POP c5
+            THROW 55
+            "#,
+        ));
+
+        assert_run_vm!(
+            r#"
+            PUSHREF x{1234aaaa} POP c4
+            PUSHREF x{1234bbbb} POP c5
+            RUNVM 36
+            CTOS SWAP CTOS SWAP
+            PUSH c4 CTOS
+            PUSH c5 CTOS
+            "#,
+            [int 0, slice child_code, cell make_cell(0x5678_u16)] => [
+                int 0,
+                int 55,
+                slice make_slice(0xabcdaaaa_u32),
+                slice make_slice(0xabcdbbbb_u32),
+                slice make_slice(0x1234aaaa_u32),
+                slice make_slice(0x1234bbbb_u32),
+            ],
+        );
+
+        // === Gas limit of parent VM is too low ===
+
+        let child_code = make_code(tvmasm!("PUSHCONT { NOP } AGAIN"));
+        assert_run_vm!(
+            "RUNVM 8 INT 1234",
+            gas: 300,
+            [int 0, slice child_code, int 1000000] => [int 301],
+            exit_code: -14,
+        )
+    }
+
+    #[test]
+    #[traced_test]
+    fn runvm_flags_1_2() {
+        // PROGRAM{
+        //  22 DECLMETHOD foo
+        //  DECLPROC main
+        //  foo PROC:<{
+        //    MUL
+        //  }>
+        //  main PROC:<{
+        //    DUP
+        //    foo CALLDICT
+        //    INC
+        //  }>
+        // }END>s
+
+        // === flag +1: same c3 ===
+
+        assert_run_vm!(
+            r#"
+            INT 10 INT 0 INT 2 PUSHSLICE te6ccgEBBAEAHgABFP8A9KQT9LzyyAsBAgLOAwIABaNUQAAJ0IPAWpI= RUNVM 1
+            INT 10 INT 0 INT 2 PUSHSLICE te6ccgEBBAEAHgABFP8A9KQT9LzyyAsBAgLOAwIABaNUQAAJ0IPAWpI= RUNVM 0
+            "#,
+            [] => [int 101, int 0, int 22, int 11],
+        );
+
+        // === flag +2(+1): push0 ===
+
+        assert_run_vm!(
+            "INT 10 INT 1 PUSHSLICE te6ccgEBBAEAHgABFP8A9KQT9LzyyAsBAgLOAwIABaNUQAAJ0IPAWpI= RUNVM 3",
+            [] => [int 101, int 0]
+        );
+    }
+
+    #[test]
+    #[traced_test]
+    fn runvm_flag_4() {
+        // flag +4 - load and return c4
+
+        let child_code = make_code(tvmasm!(
+            r#"
+            PUSHCTR c4 CTOS
+            PUSHREF x{abcd} POPCTR c4
+            INT 1000
+            "#
+        ));
+
+        assert_run_vm!(
+            r#"
+            PUSHREF x{1234} POP c4
+            RUNVM 4
+            CTOS
+            PUSH c4 CTOS
+            "#,
+            [int 0, slice child_code, cell make_cell(0x5678_u16)] => [
+                slice make_slice(0x5678_u16),
+                int 1000,
+                int 0,
+                slice make_slice(0xabcd_u16),
+                slice make_slice(0x1234_u16),
+            ]
+        );
+    }
+
+    #[test]
+    #[traced_test]
+    fn runvm_flag_8() {
+        // flag: +8 - gas limit
+
+        let child_code = make_code(tvmasm!("PUSHCONT { NOP } AGAIN"));
+
+        assert_run_vm!(
+            r#"RUNVM 8 INT 1234"#,
+            [int 0, slice child_code, int 200] => [
+                int 215,
+                int -14,
+                int 215,
+                int 1234,
+            ]
+        );
+    }
+
+    #[test]
+    #[traced_test]
+    fn runvm_flag_16() {
+        // flag +16 - load c7
+
+        let child_code = make_code(tvmasm!(
+            r#"
+            PUSH c7
+            NIL
+            INT 111 TPUSH
+            INT 222 TPUSH
+            INT 3333 TPUSH
+            POP c7
+            INT 1000
+            "#
+        ));
+
+        assert_run_vm!(
+            r#"
+            NIL
+            INT 1 TPUSH
+            INT 2 TPUSH
+            INT 3 TPUSH
+            POP c7
+            RUNVM 16
+            PUSH c7
+            "#,
+            [int 0, slice child_code, [int 10, int 15, int 20]] => [
+                [int 10, int 15, int 20],
+                int 1000,
+                int 0,
+                [int 1, int 2, int 3],
+            ],
+        );
+    }
+
+    #[test]
+    #[traced_test]
+    fn runvm_flag_32() {
+        // flag +32 - return c5
+
+        let child_code = make_code(tvmasm!(
+            r#"
+            PUSH c5 CTOS SBITREFS
+            PUSHREF x{5678} POP c5
+            INT 1000
+            "#
+        ));
+
+        assert_run_vm!(
+            r#"
+            PUSHREF x{1234} POP c5
+            RUNVM 32
+            CTOS
+            PUSH c5 CTOS
+            "#,
+            [int 0, slice child_code] => [
+                int 0,
+                int 0,
+                int 1000,
+                int 0,
+                slice make_slice(0x5678_u16),
+                slice make_slice(0x1234_u16),
+            ],
+        );
+    }
+
+    #[test]
+    #[traced_test]
+    fn runvm_flag_64() {
+        // flag +64 - hard gas limit
+
+        let child_code = make_code(tvmasm!("PUSHCONT { NOP } AGAIN"));
+        assert_run_vm!(
+            "RUNVM 72 INT 1234",
+            [int 0, slice child_code, int 200, int 500] => [int 215, int -14, int 215, int 1234],
+        );
+
+        let child_code = make_code(tvmasm!("ACCEPT PUSHCONT { NOP } AGAIN"));
+        assert_run_vm!(
+            "RUNVM 72 INT 1234",
+            [int 0, slice child_code, int 200, int 500] => [int 517, int -14, int 517, int 1234],
+        );
+    }
+
+    #[test]
+    #[traced_test]
+    fn runvm_flag_128() {
+        // flag +128 - separate loaded_cells
+
+        assert_run_vm!(
+            r#"
+            DUP CTOS DROP
+            INT 2
+            PUSHSLICE { CTOS DROP CTOS DROP }
+            INT 10000
+            RUNVM 8
+            "#,
+            [cell make_cell(0x12345678_u32), cell make_cell(0x87654321_u32)] => [
+                int 0,
+                int 202,
+            ],
+        );
+    }
+
+    #[test]
+    #[traced_test]
+    fn runvm_flag_256() {
+        // +256 - fixed number of return values
+
+        let child_code = make_code(tvmasm!("INT 1 INT 2 INT 3 INT 4 INT 5"));
+        assert_run_vm!(
+            "RUNVM 256",
+            [int 11, int 22, int 33, int 3, slice child_code.clone(), int 3] => [
+                int 3,
+                int 4,
+                int 5,
+                int 0,
+            ]
+        );
+        assert_run_vm!(
+            "RUNVM 256",
+            [int 11, int 22, int 33, int 3, slice child_code.clone(), int 0] => [int 0]
+        );
+        assert_run_vm!(
+            "RUNVM 256",
+            [int 11, int 22, int 33, int 3, slice child_code, int 20] => [int 0, int -3]
+        );
+
+        let child_code = make_code(tvmasm!("INT 1 INT 2 INT 3 INT 4 INT 5 THROW 77"));
+        assert_run_vm!(
+            "RUNVM 256",
+            [int 11, int 22, int 33, int 3, slice child_code, int 3] => [int 0, int 77]
+        );
+    }
+
+    #[test]
+    // #[traced_test]
+    fn runvm_compute_big() {
+        assert_run_vm!(
+            r#"
+            PUSHSLICE {
+                DUP EQINT 0
+                PUSHCONT {
+                    DROP DROP
+                    ZERO
+                } IFJMP
+                OVER OVER DEC
+                INT 2
+                PUSH s2
+                RUNVM 0 THROWIF 11
+                ADD NIP
+            }
+            INT 10000
+            INT 2
+            PUSHSLICE {
+                DUP EQINT 0
+                PUSHCONT {
+                    DROP DROP
+                    ZERO
+                } IFJMP
+                OVER OVER DEC
+                INT 2
+                PUSH s2
+                RUNVM 0 THROWIF 11
+                ADD NIP
+            }
+            RUNVM 0
+            "#,
+            gas: 10000000,
+            [] => [int 50005000, int 0],
+        );
+
+        assert_run_vm!(
+            r#"
+            PUSHSLICE {
+                DUP EQINT 0
+                PUSHCONT {
+                    DROP DROP
+                    ZERO
+                } IFJMP
+                OVER OVER DEC
+                INT 2
+                PUSH s2
+                RUNVM 0 THROWIF 11
+                ADD NIP
+            }
+            INT 10000
+            INT 2
+            PUSHSLICE {
+                DUP EQINT 0
+                PUSHCONT {
+                    DROP DROP
+                    ZERO
+                } IFJMP
+                OVER OVER DEC
+                INT 2
+                PUSH s2
+                RUNVM 0 THROWIF 11
+                ADD NIP
+            }
+            RUNVM 0
+            "#,
+            gas: 100000,
+            [] => [int 100001],
+            exit_code: -14,
+        );
+    }
+
+    #[test]
+    #[traced_test]
+    fn runvmx() {
+        let child_code = make_code(tvmasm!("PUSHCONT { NOP } AGAIN"));
+        assert_run_vm!(
+            r#"INT 8 RUNVMX INT 1234"#,
+            [int 0, slice child_code, int 200] => [int 215, int -14, int 215, int 1234],
+        );
+    }
+
+    #[test]
     // #[traced_test]
     fn infinite_recursion() {
         assert_run_vm!(
@@ -2331,7 +2785,42 @@ mod tests {
         );
     }
 
+    #[test]
+    // #[traced_test]
+    fn infinite_runvm() {
+        assert_run_vm!(
+            r#"
+            PUSHSLICE x{00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000}
+            PUSHSLICE x{29b80902c424a3bb10064298f03e315e179ddc47d6a6f5695500f793f05d0b9b}
+            LDU 256
+            DROP
+
+            PUSHSLICE {
+                PUSH s2
+                PUSH s2
+                ZERO ROTREV
+                CHKSIGNU DROP
+
+                DUP
+                INT 3 SWAP INT 128 RUNVMX
+            }
+            DUP
+            INT 3 SWAP INT 128 RUNVMX
+            "#,
+            [] => [int 1000001],
+            exit_code: -14,
+        );
+    }
+
     fn make_code(code: &[u8]) -> OwnedCellSlice {
         Boc::decode(code).unwrap().into_code().unwrap()
+    }
+
+    fn make_cell<T: Store>(value: T) -> Cell {
+        CellBuilder::build_from(value).unwrap()
+    }
+
+    fn make_slice<T: Store>(value: T) -> OwnedCellSlice {
+        OwnedCellSlice::new_allow_exotic(CellBuilder::build_from(value).unwrap())
     }
 }

@@ -251,6 +251,8 @@ pub struct ParentVmState<'a> {
     pub return_data: bool,
     /// Push child c5 when restoring this state.
     pub return_actions: bool,
+    /// Push consumed gas when restoring this state.
+    pub return_gas: bool,
     /// Number of return values.
     ///
     /// `None` means that child stack will be merged with the parent.
@@ -950,6 +952,8 @@ impl<'a> VmState<'a> {
             return Ok(());
         };
 
+        let steps = self.steps;
+
         // Restore all values first.
         self.code = parent.code;
         let child_stack = std::mem::replace(&mut self.stack, parent.stack);
@@ -959,10 +963,14 @@ impl<'a> VmState<'a> {
         self.steps += parent.steps;
         self.quit0 = parent.quit0;
         self.quit1 = parent.quit1;
-        let return_gas = matches!(&parent.gas, ParentGasConsumer::Isolated(_));
         let child_gas = self.gas.restore(parent.gas);
         self.cp = parent.cp;
         self.parent = parent.parent;
+
+        vm_log_trace!(
+            "child vm finished: res={res}, steps={steps}, gas={}",
+            child_gas.gas_consumed
+        );
 
         // === Apply child VM results to the restored state ===
 
@@ -1022,8 +1030,7 @@ impl<'a> VmState<'a> {
                 Some(cell) => SafeRc::new_dyn_value(cell),
             })
         }
-
-        if return_gas {
+        if parent.return_gas {
             stack.push(SafeRc::new_dyn_value(BigInt::from(child_gas.gas_consumed)));
         }
 
