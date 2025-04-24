@@ -62,6 +62,7 @@ pub fn make_default_params() -> ExecutorParams {
     ExecutorParams {
         block_unixtime: 1738799198,
         full_body_in_bounced: false,
+        strict_extra_currency: true,
         vm_modifiers: tycho_vm::BehaviourModifiers {
             chksig_always_succeed: true,
             ..Default::default()

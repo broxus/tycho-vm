@@ -3,8 +3,9 @@ use everscale_types::cell::{CellTreeStats, Lazy};
 use everscale_types::error::Error;
 use everscale_types::models::{
     AccountState, AccountStatus, AccountStatusChange, ActionPhase, ChangeLibraryMode,
-    CurrencyCollection, ExecutedComputePhase, LibRef, OutAction, OwnedMessage, OwnedRelaxedMessage,
-    RelaxedMsgInfo, ReserveCurrencyFlags, SendMsgFlags, SimpleLib, StateInit, StorageUsedShort,
+    CurrencyCollection, ExecutedComputePhase, ExtraCurrencyCollection, LibRef, OutAction,
+    OwnedMessage, OwnedRelaxedMessage, RelaxedMsgInfo, ReserveCurrencyFlags, SendMsgFlags,
+    SimpleLib, StateInit, StorageUsedShort,
 };
 use everscale_types::num::{Tokens, VarUint56};
 use everscale_types::prelude::*;
@@ -158,6 +159,7 @@ impl ExecutorState<'_> {
         // Execute actions.
         let mut action_ctx = ActionContext {
             need_bounce_on_fail: false,
+            strict_extra_currency: self.params.strict_extra_currency,
             received_message: ctx.received_message,
             original_balance: &ctx.original_balance,
             remaining_balance: self.balance.clone(),
@@ -291,9 +293,22 @@ impl ExecutorState<'_> {
         action_ctx.action_phase.success = true;
 
         if action_ctx.delete_account {
-            debug_assert!(action_ctx.remaining_balance.is_zero());
+            if self.params.strict_extra_currency {
+                // Require only native balance to be zero for strict EC behaviour.
+                debug_assert!(action_ctx.remaining_balance.tokens.is_zero());
+            } else {
+                // Otherwise account must have a completely empty balance.
+                debug_assert!(action_ctx.remaining_balance.is_zero());
+            }
             action_ctx.action_phase.status_change = AccountStatusChange::Deleted;
-            self.end_status = AccountStatus::NotExists;
+            self.end_status = if action_ctx.remaining_balance.is_zero() {
+                // Delete account only if its balance is completely empty
+                // (both native and extra currency balance is zero).
+                AccountStatus::NotExists
+            } else {
+                // Leave account as uninit if it still has some extra currencies.
+                AccountStatus::Uninit
+            };
             self.cached_storage_stat = None;
         }
 
@@ -414,6 +429,22 @@ impl ExecutorState<'_> {
                 }
                 use_mc_prices |= info.dst.is_masterchain();
 
+                // Rewrite extra currencies.
+                if self.params.strict_extra_currency {
+                    match normalize_extra_balance(
+                        std::mem::take(&mut info.value.other),
+                        MAX_MSG_EXTRA_CURRENCIES,
+                    ) {
+                        Ok(other) => info.value.other = other,
+                        Err(BalanceExtraError::InvalidDict(_)) => {
+                            return check_skip_invalid(ResultCode::NotEnoughBalance, ctx);
+                        }
+                        Err(BalanceExtraError::OutOfLimit) => {
+                            return check_skip_invalid(ResultCode::TooManyExtraCurrencies, ctx);
+                        }
+                    }
+                }
+
                 // Reset fees.
                 info.ihr_fee = Tokens::ZERO;
                 info.fwd_fee = Tokens::ZERO;
@@ -519,10 +550,13 @@ impl ExecutorState<'_> {
                     }
                 }
 
-                if let RelaxedMsgInfo::Int(int) = &relaxed_info {
-                    if let Some(cell) = int.value.other.as_dict().root() {
-                        if !stats.add_cell(cell.as_ref()) {
-                            break 'valid;
+                // Add EC dict when `strict` behaviour is disabled.
+                if !self.params.strict_extra_currency {
+                    if let RelaxedMsgInfo::Int(int) = &relaxed_info {
+                        if let Some(cell) = int.value.other.as_dict().root() {
+                            if !stats.add_cell(cell.as_ref()) {
+                                break 'valid;
+                            }
                         }
                     }
                 }
@@ -563,6 +597,13 @@ impl ExecutorState<'_> {
                     return check_skip_invalid(ResultCode::NotEnoughBalance, ctx);
                 }
 
+                // Check that the number of extra currencies is whithin the limit.
+                if self.params.strict_extra_currency
+                    && !check_extra_balance(&info.value.other, MAX_MSG_EXTRA_CURRENCIES)
+                {
+                    return check_skip_invalid(ResultCode::TooManyExtraCurrencies, ctx);
+                }
+
                 // Try to withdraw extra currencies from the remaining balance.
                 let other = match ctx.remaining_balance.other.checked_sub(&info.value.other) {
                     Ok(other) => other,
@@ -587,7 +628,13 @@ impl ExecutorState<'_> {
                     if mode.contains(SendMsgFlags::ALL_BALANCE)
                         || mode.contains(SendMsgFlags::WITH_REMAINING_BALANCE)
                     {
-                        msg.balance_remaining = CurrencyCollection::ZERO;
+                        if self.params.strict_extra_currency {
+                            // Only native balance was used.
+                            msg.balance_remaining.tokens = Tokens::ZERO;
+                        } else {
+                            // All balance was used.
+                            msg.balance_remaining = CurrencyCollection::ZERO;
+                        }
                     }
                 }
 
@@ -631,8 +678,15 @@ impl ExecutorState<'_> {
         *ctx.action_phase.total_fwd_fees.get_or_insert_default() += fwd_fee;
 
         if mode.contains(DELETE_MASK) {
-            debug_assert!(ctx.remaining_balance.is_zero());
-            ctx.delete_account = ctx.reserved_balance.is_zero();
+            ctx.delete_account = if self.params.strict_extra_currency {
+                // Delete when native balance was used.
+                debug_assert!(ctx.remaining_balance.tokens.is_zero());
+                ctx.reserved_balance.tokens.is_zero()
+            } else {
+                // Delete when full balance was used.
+                debug_assert!(ctx.remaining_balance.is_zero());
+                ctx.reserved_balance.is_zero()
+            };
         }
 
         Ok(SendMsgResult::Sent)
@@ -667,9 +721,24 @@ impl ExecutorState<'_> {
             return Err(ActionFailed);
         }
 
+        if self.params.strict_extra_currency && !reserve.other.is_empty() {
+            // Cannot reserve extra currencies when strict behaviour is enabled.
+            return Err(ActionFailed);
+        }
+
         if mode.contains(ReserveCurrencyFlags::WITH_ORIGINAL_BALANCE) {
             if mode.contains(ReserveCurrencyFlags::REVERSE) {
-                reserve = ctx.original_balance.checked_sub(&reserve)?;
+                if self.params.strict_extra_currency {
+                    reserve.tokens = ctx
+                        .original_balance
+                        .tokens
+                        .checked_sub(reserve.tokens)
+                        .ok_or(ActionFailed)?;
+                } else {
+                    reserve = ctx.original_balance.checked_sub(&reserve)?;
+                }
+            } else if self.params.strict_extra_currency {
+                reserve.try_add_assign_tokens(ctx.original_balance.tokens)?;
             } else {
                 reserve.try_add_assign(ctx.original_balance)?;
             }
@@ -706,7 +775,11 @@ impl ExecutorState<'_> {
 
         // Apply "ALL_BUT" flag. Leave only "new_balance", reserve everything else.
         if mode.contains(ReserveCurrencyFlags::ALL_BUT) {
-            std::mem::swap(&mut new_balance, &mut reserve);
+            if self.params.strict_extra_currency {
+                std::mem::swap(&mut new_balance.tokens, &mut reserve.tokens);
+            } else {
+                std::mem::swap(&mut new_balance, &mut reserve);
+            }
         }
 
         // Update context.
@@ -800,6 +873,7 @@ impl ExecutorState<'_> {
 
 struct ActionContext<'a> {
     need_bounce_on_fail: bool,
+    strict_extra_currency: bool,
     received_message: Option<&'a mut ReceivedMessage>,
     original_balance: &'a CurrencyCollection,
     remaining_balance: CurrencyCollection,
@@ -840,7 +914,7 @@ impl ActionContext<'_> {
     }
 
     fn rewrite_message_value(
-        &mut self,
+        &self,
         value: &mut CurrencyCollection,
         mut mode: SendMsgFlags,
         fees_total: Tokens,
@@ -848,14 +922,26 @@ impl ActionContext<'_> {
         // Update `value` based on flags.
         if mode.contains(SendMsgFlags::ALL_BALANCE) {
             // Attach all remaining balance to the message.
-            *value = self.remaining_balance.clone();
+            if self.strict_extra_currency {
+                // Attach only native balance when strict behaviour is enabled.
+                value.tokens = self.remaining_balance.tokens;
+            } else {
+                // Attach both native and extra currencies otherwise.
+                *value = self.remaining_balance.clone();
+            };
             // Pay fees from the attached value.
             mode.remove(SendMsgFlags::PAY_FEE_SEPARATELY);
         } else if mode.contains(SendMsgFlags::WITH_REMAINING_BALANCE) {
             if let Some(msg) = &self.received_message {
                 // Attach all remaining balance of the inbound message.
                 // (in addition to the original value).
-                value.try_add_assign(&msg.balance_remaining)?;
+                if self.strict_extra_currency {
+                    // Attach only native balance when strict behaviour is enabled.
+                    value.try_add_assign_tokens(msg.balance_remaining.tokens)?;
+                } else {
+                    // Attach both native and extra currencies otherwise.
+                    value.try_add_assign(&msg.balance_remaining)?;
+                }
             }
 
             if !mode.contains(SendMsgFlags::PAY_FEE_SEPARATELY) {
@@ -1020,6 +1106,40 @@ fn update_total_msg_stat(
     total_message_size.cells = total_message_size.cells.saturating_add(cells_diff);
 }
 
+fn check_extra_balance(value: &ExtraCurrencyCollection, limit: usize) -> bool {
+    for (i, entry) in value.as_dict().iter().enumerate() {
+        if i > limit || entry.is_err() {
+            return false;
+        }
+    }
+    true
+}
+
+fn normalize_extra_balance(
+    value: ExtraCurrencyCollection,
+    limit: usize,
+) -> Result<ExtraCurrencyCollection, BalanceExtraError> {
+    let mut result = value.clone();
+    for (i, entry) in value.as_dict().iter().enumerate() {
+        if i > limit {
+            return Err(BalanceExtraError::OutOfLimit);
+        }
+        let (currency_id, other) = entry.map_err(BalanceExtraError::InvalidDict)?;
+        if other.is_zero() {
+            result
+                .as_dict_mut()
+                .remove(currency_id)
+                .map_err(BalanceExtraError::InvalidDict)?;
+        }
+    }
+    Ok(result)
+}
+
+enum BalanceExtraError {
+    OutOfLimit,
+    InvalidDict(#[allow(unused)] Error),
+}
+
 #[repr(i32)]
 #[derive(Debug, thiserror::Error)]
 enum ResultCode {
@@ -1047,9 +1167,14 @@ enum ResultCode {
     InvalidLibrariesDict = 42,
     #[error("too many library cells")]
     LibOutOfLimits = 43,
+    #[error("too many extra currencies")]
+    TooManyExtraCurrencies = 44,
     #[error("state exceeds limits")]
     StateOutOfLimits = 50,
 }
+
+// TODO: Move into config parm 43.
+const MAX_MSG_EXTRA_CURRENCIES: usize = 2;
 
 #[cfg(test)]
 mod tests {
