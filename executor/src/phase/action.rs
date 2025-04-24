@@ -1178,16 +1178,19 @@ const MAX_MSG_EXTRA_CURRENCIES: usize = 2;
 
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeMap;
+
     use everscale_asm_macros::tvmasm;
     use everscale_types::merkle::MerkleProof;
     use everscale_types::models::{
         Anycast, IntAddr, MessageLayout, MsgInfo, RelaxedIntMsgInfo, RelaxedMessage, StdAddr,
         VarAddr,
     };
-    use everscale_types::num::Uint9;
+    use everscale_types::num::{Uint9, VarUint248};
 
     use super::*;
     use crate::tests::{make_default_config, make_default_params};
+    use crate::ExecutorParams;
 
     const STUB_ADDR: StdAddr = StdAddr::new(0, HashBytes::ZERO);
     const OK_BALANCE: Tokens = Tokens::new(1_000_000_000);
@@ -1257,7 +1260,20 @@ mod tests {
         .cast_into()
     }
 
-    fn compute_full_stats(msg: &Lazy<OwnedMessage>) -> StorageUsedShort {
+    fn compute_full_stats(msg: &Lazy<OwnedMessage>, params: &ExecutorParams) -> StorageUsedShort {
+        let msg = 'cell: {
+            if params.strict_extra_currency {
+                let mut parsed = msg.load().unwrap();
+                if let MsgInfo::Int(int) = &mut parsed.info {
+                    if !int.value.other.is_empty() {
+                        int.value.other = ExtraCurrencyCollection::new();
+                        break 'cell CellBuilder::build_from(parsed).unwrap();
+                    }
+                }
+            }
+            msg.inner().clone()
+        };
+
         let stats = {
             let mut stats = ExtStorageStat::with_limits(StorageStatLimits::UNLIMITED);
             assert!(stats.add_cell(msg.as_ref()));
@@ -1475,6 +1491,57 @@ mod tests {
     }
 
     #[test]
+    fn strict_reserve_extra_currency() -> Result<()> {
+        let mut params = make_default_params();
+        params.strict_extra_currency = true;
+        let config = make_default_config();
+        let mut state = ExecutorState::new_uninit(&params, &config, &STUB_ADDR, OK_BALANCE);
+        let prev_balance = state.balance.clone();
+
+        let compute_phase = stub_compute_phase(OK_GAS);
+        let prev_total_fees = state.total_fees;
+        let prev_end_lt = state.end_lt;
+
+        let actions = make_action_list([OutAction::ReserveCurrency {
+            mode: ReserveCurrencyFlags::empty(),
+            value: CurrencyCollection {
+                tokens: Tokens::ZERO,
+                other: BTreeMap::from_iter([(123u32, VarUint248::new(10))]).try_into()?,
+            },
+        }]);
+
+        let ActionPhaseFull {
+            action_phase,
+            action_fine,
+            state_exceeds_limits,
+            bounce,
+        } = state.action_phase(ActionPhaseContext {
+            received_message: None,
+            original_balance: original_balance(&state, &compute_phase),
+            new_state: StateInit::default(),
+            actions: actions.clone(),
+            compute_phase: &compute_phase,
+        })?;
+
+        assert_eq!(action_phase, ActionPhase {
+            success: false,
+            valid: true,
+            result_code: ResultCode::ActionInvalid as i32,
+            result_arg: Some(0),
+            action_list_hash: *actions.repr_hash(),
+            total_actions: 1,
+            ..empty_action_phase()
+        });
+        assert_eq!(action_fine, Tokens::ZERO);
+        assert!(!state_exceeds_limits);
+        assert!(!bounce);
+        assert_eq!(state.total_fees, prev_total_fees);
+        assert_eq!(state.balance, prev_balance);
+        assert_eq!(state.end_lt, prev_end_lt);
+        Ok(())
+    }
+
+    #[test]
     fn send_single_message() -> Result<()> {
         let params = make_default_params();
         let config = make_default_config();
@@ -1551,7 +1618,7 @@ mod tests {
             total_actions: 1,
             messages_created: 1,
             action_list_hash: *actions.repr_hash(),
-            total_message_size: compute_full_stats(last_msg),
+            total_message_size: compute_full_stats(last_msg, &params),
             ..empty_action_phase()
         });
 
@@ -1640,12 +1707,272 @@ mod tests {
             total_actions: 1,
             messages_created: 1,
             action_list_hash: *actions.repr_hash(),
-            total_message_size: compute_full_stats(last_msg),
+            total_message_size: compute_full_stats(last_msg, &params),
             ..empty_action_phase()
         });
 
         assert_eq!(state.total_fees, prev_total_fees + expected_first_frac);
         assert_eq!(state.balance, CurrencyCollection::ZERO);
+
+        Ok(())
+    }
+
+    #[test]
+    fn strict_send_all_balance() -> Result<()> {
+        let mut params = make_default_params();
+        params.strict_extra_currency = true;
+        let config = make_default_config();
+
+        let mut state =
+            ExecutorState::new_uninit(&params, &config, &STUB_ADDR, CurrencyCollection {
+                tokens: OK_BALANCE,
+                other: BTreeMap::from_iter([(0u32, VarUint248::new(1000))]).try_into()?,
+            });
+
+        let compute_phase = stub_compute_phase(OK_GAS);
+        let prev_total_fees = state.total_fees;
+        let prev_balance = state.balance.clone();
+        let prev_end_lt = state.end_lt;
+
+        let sent_value = CurrencyCollection {
+            tokens: Tokens::ZERO,
+            other: BTreeMap::from_iter([(0u32, VarUint248::new(1))]).try_into()?,
+        };
+
+        let actions = make_action_list([OutAction::SendMsg {
+            mode: SendMsgFlags::ALL_BALANCE,
+            out_msg: make_relaxed_message(
+                RelaxedIntMsgInfo {
+                    dst: STUB_ADDR.into(),
+                    value: sent_value.clone(),
+                    ..Default::default()
+                },
+                None,
+                None,
+            ),
+        }]);
+
+        let ActionPhaseFull {
+            action_phase,
+            action_fine,
+            state_exceeds_limits,
+            bounce,
+        } = state.action_phase(ActionPhaseContext {
+            received_message: None,
+            original_balance: original_balance(&state, &compute_phase),
+            new_state: StateInit::default(),
+            actions: actions.clone(),
+            compute_phase: &compute_phase,
+        })?;
+
+        assert_eq!(action_fine, Tokens::ZERO);
+        assert!(!state_exceeds_limits);
+        assert!(!bounce);
+
+        assert_eq!(state.out_msgs.len(), 1);
+        assert_eq!(state.end_lt, prev_end_lt + 1);
+        let last_msg = state.out_msgs.last().unwrap();
+
+        let msg_info = {
+            let msg = last_msg.load()?;
+            assert!(msg.init.is_none());
+            assert_eq!(msg.body, Default::default());
+            match msg.info {
+                MsgInfo::Int(info) => info,
+                e => panic!("unexpected msg info {e:?}"),
+            }
+        };
+        assert_eq!(msg_info.src, STUB_ADDR.into());
+        assert_eq!(msg_info.dst, STUB_ADDR.into());
+        assert!(msg_info.ihr_disabled);
+        assert!(!msg_info.bounce);
+        assert!(!msg_info.bounced);
+        assert_eq!(msg_info.created_at, params.block_unixtime);
+        assert_eq!(msg_info.created_lt, prev_end_lt);
+
+        let expected_fwd_fees = Tokens::new(config.fwd_prices.lump_price as _);
+        let expected_first_frac = config.fwd_prices.get_first_part(expected_fwd_fees);
+
+        assert_eq!(msg_info.value, CurrencyCollection {
+            tokens: prev_balance.tokens - expected_fwd_fees,
+            other: sent_value.other.clone(),
+        });
+        assert_eq!(msg_info.fwd_fee, expected_fwd_fees - expected_first_frac);
+        assert_eq!(msg_info.ihr_fee, Tokens::ZERO);
+
+        assert_eq!(action_phase, ActionPhase {
+            total_fwd_fees: Some(expected_fwd_fees),
+            total_action_fees: Some(expected_first_frac),
+            total_actions: 1,
+            messages_created: 1,
+            action_list_hash: *actions.repr_hash(),
+            total_message_size: compute_full_stats(last_msg, &params),
+            ..empty_action_phase()
+        });
+
+        assert_eq!(state.total_fees, prev_total_fees + expected_first_frac);
+        assert_eq!(state.balance.tokens, Tokens::ZERO);
+        assert_eq!(
+            state.balance.other,
+            prev_balance.other.checked_sub(&sent_value.other)?
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn strict_send_all_balance_destroy() -> Result<()> {
+        struct TestCase {
+            balance: CurrencyCollection,
+            to_send: CurrencyCollection,
+            expected_end_status: AccountStatus,
+        }
+
+        let mut params = make_default_params();
+        params.strict_extra_currency = true;
+        let config = make_default_config();
+
+        for TestCase {
+            balance,
+            to_send,
+            expected_end_status,
+        } in [
+            // Simple send all + delete
+            TestCase {
+                balance: OK_BALANCE.into(),
+                to_send: CurrencyCollection::ZERO,
+                expected_end_status: AccountStatus::NotExists,
+            },
+            // Simple send all but account has some extra currencies
+            TestCase {
+                balance: CurrencyCollection {
+                    tokens: OK_BALANCE,
+                    other: BTreeMap::from_iter([(0u32, VarUint248::new(1000))]).try_into()?,
+                },
+                to_send: CurrencyCollection::ZERO,
+                expected_end_status: AccountStatus::Uninit,
+            },
+            // Simple send all but account has some extra currencies
+            TestCase {
+                balance: CurrencyCollection {
+                    tokens: OK_BALANCE,
+                    other: BTreeMap::from_iter([(0u32, VarUint248::new(1000))]).try_into()?,
+                },
+                to_send: CurrencyCollection::ZERO,
+                expected_end_status: AccountStatus::Uninit,
+            },
+            // Send all native + some extra but account still has some more extra currencies
+            TestCase {
+                balance: CurrencyCollection {
+                    tokens: OK_BALANCE,
+                    other: BTreeMap::from_iter([(0u32, VarUint248::new(1000))]).try_into()?,
+                },
+                to_send: CurrencyCollection {
+                    tokens: OK_BALANCE,
+                    other: BTreeMap::from_iter([(0u32, VarUint248::new(1))]).try_into()?,
+                },
+                expected_end_status: AccountStatus::Uninit,
+            },
+            // Send all native and all extra
+            TestCase {
+                balance: CurrencyCollection {
+                    tokens: OK_BALANCE,
+                    other: BTreeMap::from_iter([(0u32, VarUint248::new(1000))]).try_into()?,
+                },
+                to_send: CurrencyCollection {
+                    tokens: OK_BALANCE,
+                    other: BTreeMap::from_iter([(0u32, VarUint248::new(1000))]).try_into()?,
+                },
+                expected_end_status: AccountStatus::NotExists,
+            },
+        ] {
+            let mut state = ExecutorState::new_uninit(&params, &config, &STUB_ADDR, balance);
+
+            let compute_phase = stub_compute_phase(OK_GAS);
+            let prev_total_fees = state.total_fees;
+            let prev_balance = state.balance.clone();
+            let prev_end_lt = state.end_lt;
+
+            let actions = make_action_list([OutAction::SendMsg {
+                mode: SendMsgFlags::ALL_BALANCE | SendMsgFlags::DELETE_IF_EMPTY,
+                out_msg: make_relaxed_message(
+                    RelaxedIntMsgInfo {
+                        dst: STUB_ADDR.into(),
+                        value: to_send.clone(),
+                        ..Default::default()
+                    },
+                    None,
+                    None,
+                ),
+            }]);
+
+            let ActionPhaseFull {
+                action_phase,
+                action_fine,
+                state_exceeds_limits,
+                bounce,
+            } = state.action_phase(ActionPhaseContext {
+                received_message: None,
+                original_balance: original_balance(&state, &compute_phase),
+                new_state: StateInit::default(),
+                actions: actions.clone(),
+                compute_phase: &compute_phase,
+            })?;
+
+            assert_eq!(action_fine, Tokens::ZERO);
+            assert!(!state_exceeds_limits);
+            assert!(!bounce);
+
+            assert_eq!(state.end_status, expected_end_status);
+            assert_eq!(state.out_msgs.len(), 1);
+            assert_eq!(state.end_lt, prev_end_lt + 1);
+            let last_msg = state.out_msgs.last().unwrap();
+
+            let msg_info = {
+                let msg = last_msg.load()?;
+                assert!(msg.init.is_none());
+                assert_eq!(msg.body, Default::default());
+                match msg.info {
+                    MsgInfo::Int(info) => info,
+                    e => panic!("unexpected msg info {e:?}"),
+                }
+            };
+            assert_eq!(msg_info.src, STUB_ADDR.into());
+            assert_eq!(msg_info.dst, STUB_ADDR.into());
+            assert!(msg_info.ihr_disabled);
+            assert!(!msg_info.bounce);
+            assert!(!msg_info.bounced);
+            assert_eq!(msg_info.created_at, params.block_unixtime);
+            assert_eq!(msg_info.created_lt, prev_end_lt);
+
+            let expected_fwd_fees = Tokens::new(config.fwd_prices.lump_price as _);
+            let expected_first_frac = config.fwd_prices.get_first_part(expected_fwd_fees);
+
+            assert_eq!(msg_info.value, CurrencyCollection {
+                tokens: prev_balance.tokens - expected_fwd_fees,
+                other: to_send.other.clone(),
+            });
+            assert_eq!(msg_info.fwd_fee, expected_fwd_fees - expected_first_frac);
+            assert_eq!(msg_info.ihr_fee, Tokens::ZERO);
+
+            assert_eq!(action_phase, ActionPhase {
+                total_fwd_fees: Some(expected_fwd_fees),
+                total_action_fees: Some(expected_first_frac),
+                total_actions: 1,
+                messages_created: 1,
+                action_list_hash: *actions.repr_hash(),
+                total_message_size: compute_full_stats(last_msg, &params),
+                status_change: AccountStatusChange::Deleted,
+                ..empty_action_phase()
+            });
+
+            assert_eq!(state.total_fees, prev_total_fees + expected_first_frac);
+            assert_eq!(state.balance.tokens, Tokens::ZERO);
+            assert_eq!(
+                state.balance.other,
+                prev_balance.other.checked_sub(&to_send.other)?
+            );
+        }
 
         Ok(())
     }
@@ -1731,7 +2058,7 @@ mod tests {
             messages_created: 1,
             special_actions: 1,
             action_list_hash: *actions.repr_hash(),
-            total_message_size: compute_full_stats(last_msg),
+            total_message_size: compute_full_stats(last_msg, &params),
             ..empty_action_phase()
         });
         assert_eq!(action_fine, Tokens::ZERO);
@@ -2035,7 +2362,7 @@ mod tests {
             total_fwd_fees: Some(expected_fwd_fees),
             total_action_fees: Some(first_frac),
             action_list_hash: *actions.repr_hash(),
-            total_message_size: compute_full_stats(last_msg),
+            total_message_size: compute_full_stats(last_msg, &params),
             ..empty_action_phase()
         });
         assert_eq!(action_fine, Tokens::ZERO);
