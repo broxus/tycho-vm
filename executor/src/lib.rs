@@ -331,6 +331,8 @@ pub struct ExecutorParams {
     /// Attaches an original message body as an additional cell
     /// to a bounced message body.
     pub full_body_in_bounced: bool,
+    /// More gas-predictable extra currency behaviour.
+    pub strict_extra_currency: bool,
 }
 
 /// Executed transaction.
@@ -444,9 +446,10 @@ impl<'a, 's> UncommittedTransaction<'a, 's> {
 
                 // Update storage info.
                 self.exec.storage_stat.used = compute_storage_used(
-                    &prev_account_storage,
+                    prev_account_storage,
                     account_storage.as_full_slice(),
                     &mut self.exec.cached_storage_stat,
+                    self.exec.params.strict_extra_currency,
                 )?;
 
                 // Build new account state.
@@ -512,7 +515,7 @@ impl<'a, 's> UncommittedTransaction<'a, 's> {
         Ok(match self.exec.end_status {
             // Account was deleted.
             AccountStatus::NotExists => None,
-            // Uninit account we zero balance is also treated as deleted.
+            // Uninit account with zero balance is also treated as deleted.
             AccountStatus::Uninit if self.exec.balance.is_zero() => None,
             // Uninit account stays the same.
             AccountStatus::Uninit => Some(AccountState::Uninit),
@@ -572,10 +575,30 @@ impl<'a, 's> UncommittedTransaction<'a, 's> {
 }
 
 fn compute_storage_used(
-    prev: &Option<(StorageUsed, CellSlice<'_>)>,
-    new_storage: CellSlice<'_>,
+    mut prev: Option<(StorageUsed, CellSlice<'_>)>,
+    mut new_storage: CellSlice<'_>,
     cache: &mut Option<OwnedExtStorageStat>,
+    without_extra_currencies: bool,
 ) -> Result<StorageUsed> {
+    fn skip_extra(slice: &mut CellSlice<'_>) -> Result<bool, Error> {
+        let mut cs = *slice;
+        cs.skip_first(64, 0)?; // skip lt
+        let balance = CurrencyCollection::load_from(&mut cs)?;
+        Ok(if balance.other.is_empty() {
+            false
+        } else {
+            slice.skip_first(0, 1)?;
+            true
+        })
+    }
+
+    if without_extra_currencies {
+        if let Some((_, prev)) = &mut prev {
+            skip_extra(prev)?;
+        }
+        skip_extra(&mut new_storage)?;
+    }
+
     // Try to reuse previous storage stats if no cells were changed.
     if let Some((prev_used, prev_storage)) = prev {
         'reuse: {
@@ -761,6 +784,7 @@ mod tests {
         ExecutorParams {
             block_unixtime: 1738799198,
             full_body_in_bounced: false,
+            strict_extra_currency: true,
             vm_modifiers: tycho_vm::BehaviourModifiers {
                 chksig_always_succeed: true,
                 ..Default::default()
