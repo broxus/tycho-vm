@@ -147,7 +147,6 @@ impl ExecutorState<'_> {
             });
             return Ok(res);
         }
-
         // Apply internal message state.
         let state_libs;
         let msg_libs;
@@ -263,7 +262,9 @@ impl ExecutorState<'_> {
             .with_storage_fees(ctx.storage_fee)
             .require_ton_v6()
             .with_unpacked_config(self.config.unpacked.as_tuple())
-            .require_ton_v9();
+            .require_ton_v9()
+            .require_ton_v11()
+            .with_in_message(ctx.input.in_msg().map(|x| &x.root))?;
 
         let libraries = (msg_libs, state_libs, &self.params.libraries);
         let mut vm = VmState::builder()

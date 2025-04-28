@@ -27,20 +27,7 @@ impl ConfigOps {
         Ok(0)
     }
 
-    #[op(code = "f88111", fmt = "INMSGPARAMS")]
-    fn exec_get_in_msg_params(st: &mut VmState) -> VmResult<i32> {
-        ok!(st.version.require_ton(11..));
-        let stack = SafeRc::make_mut(&mut st.stack);
-        ok!(get_and_push_param(
-            &mut st.cr,
-            stack,
-            SmcInfoTonV11::IN_MSG_PARAMS_IDX
-        ));
-        Ok(0)
-    }
-
-    #[op(code = "f8ssss @ f88100..f88111", fmt = "GETPARAMLONG {s}", args(s = args & 255))]
-    #[op(code = "f8ssss @ f88112..f881ff", fmt = "GETPARAMLONG {s}", args(s = args & 255))]
+    #[op(code = "f881ss", fmt = DisplayConfigOpsArgs(s))]
     fn exec_get_param_long(st: &mut VmState, s: u32) -> VmResult<i32> {
         ok!(st.version.require_ton(11..));
         let stack = SafeRc::make_mut(&mut st.stack);
@@ -392,6 +379,7 @@ impl std::fmt::Display for DisplayConfigOpsArgs {
             13 => "PREVBLOCKSINFOTUPLE",
             14 => "UNPACKEDCONFIGTUPLE",
             15 => "DUEPAYMENT",
+            17 => "INMSGPARAMS",
             i => return write!(f, "GETPARAM {i}"),
         };
         write!(f, "{}", code)
@@ -480,8 +468,38 @@ mod test {
     use everscale_types::models::{CurrencyCollection, ExtraCurrencyCollection};
     use everscale_types::num::VarUint248;
     use tracing_test::traced_test;
+    use tycho_vm::smc_info::SmcInfoTonV11;
 
-    use crate::{SmcInfoBase, VmState};
+    use crate::{RcStackValue, SmcInfoBase, Stack, VmState};
+
+    #[test]
+    #[traced_test]
+    pub fn in_msg_params_works() {
+        let params = tuple![int 0, int 1,int 2,int 3,int 4,int 5,int 6,int 7,int 8,int 9];
+        let mut c7 = Vec::<RcStackValue>::with_capacity(17);
+        let params = RcStackValue::from(params);
+
+        for i in 0..=SmcInfoTonV11::IN_MSG_PARAMS_IDX {
+            if i == SmcInfoTonV11::IN_MSG_PARAMS_IDX {
+                c7.push(params.clone());
+            } else {
+                c7.push(Stack::make_null());
+            }
+        }
+        let c7 = tuple![raw RcStackValue::from(c7)];
+
+        assert_run_vm!("INMSGPARAMS", c7: c7.clone(), [] => [raw params]);
+        assert_run_vm!("INMSG_BOUNCE", c7: c7.clone(), [] => [int 0]);
+        assert_run_vm!("INMSG_BOUNCED", c7: c7.clone(), [] => [int 1]);
+        assert_run_vm!("INMSG_SRC", c7: c7.clone(), [] => [int 2]);
+        assert_run_vm!("INMSG_FWDFEE", c7: c7.clone(), [] => [int 3]);
+        assert_run_vm!("INMSG_LT", c7: c7.clone(), [] => [int 4]);
+        assert_run_vm!("INMSG_UTIME", c7: c7.clone(), [] => [int 5]);
+        assert_run_vm!("INMSG_ORIGVALUE", c7: c7.clone(), [] => [int 6]);
+        assert_run_vm!("INMSG_VALUE", c7: c7.clone(), [] => [int 7]);
+        assert_run_vm!("INMSG_VALUEEXTRA", c7: c7.clone(), [] => [int 8]);
+        assert_run_vm!("INMSG_STATEINIT", c7: c7.clone(), [] => [int 9]);
+    }
 
     #[test]
     #[traced_test]
