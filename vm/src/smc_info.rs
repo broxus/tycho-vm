@@ -21,7 +21,7 @@ pub enum VmVersion {
 }
 
 impl VmVersion {
-    pub const LATEST_TON: Self = Self::Ton(10);
+    pub const LATEST_TON: Self = Self::Ton(11);
 
     pub fn is_ton<R: std::ops::RangeBounds<u32>>(&self, range: R) -> bool {
         matches!(self, Self::Ton(version) if range.contains(version))
@@ -485,6 +485,34 @@ impl SmcInfoTonV9 {
 impl SmcInfo for SmcInfoTonV9 {
     fn version(&self) -> VmVersion {
         VmVersion::Ton(9)
+    }
+
+    fn build_c7(&self) -> SafeRc<Tuple> {
+        let mut t1 = Vec::with_capacity(Self::C7_ITEM_COUNT);
+        self.write_items(&mut t1);
+        SafeRc::new(vec![SafeRc::new_dyn_value(t1)])
+    }
+}
+
+#[derive(Default, Debug, Clone)]
+#[repr(transparent)]
+pub struct SmcInfoTonV11 {
+    pub base: SmcInfoTonV9,
+}
+
+impl SmcInfoTonV11 {
+    pub const IN_MSG_PARAMS_IDX: usize = 17;
+    const C7_ITEM_COUNT: usize = SmcInfoTonV9::C7_ITEM_COUNT + 1;
+    #[inline]
+    fn write_items(&self, items: &mut Tuple) {
+        // ..base:SmcInfoTonV9
+        self.base.write_items(items);
+    }
+}
+
+impl SmcInfo for SmcInfoTonV11 {
+    fn version(&self) -> VmVersion {
+        VmVersion::Ton(11)
     }
 
     fn build_c7(&self) -> SafeRc<Tuple> {
