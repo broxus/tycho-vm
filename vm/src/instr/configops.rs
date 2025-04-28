@@ -11,7 +11,7 @@ use crate::cont::ControlRegs;
 use crate::error::VmResult;
 use crate::gas::GasConsumer;
 use crate::saferc::SafeRc;
-use crate::smc_info::{SmcInfoBase, SmcInfoTonV4, SmcInfoTonV6};
+use crate::smc_info::{SmcInfoBase, SmcInfoTonV11, SmcInfoTonV4, SmcInfoTonV6};
 use crate::stack::{RcStackValue, Stack, TupleExt};
 use crate::state::VmState;
 use crate::util::{shift_ceil_price, OwnedCellSlice};
@@ -24,6 +24,35 @@ impl ConfigOps {
     fn exec_get_param(st: &mut VmState, s: u32) -> VmResult<i32> {
         let stack = SafeRc::make_mut(&mut st.stack);
         ok!(get_and_push_param(&mut st.cr, stack, s as usize));
+        Ok(0)
+    }
+
+    #[op(code = "f88111", fmt = "INMSGPARAMS")]
+    fn exec_get_in_msg_params(st: &mut VmState) -> VmResult<i32> {
+        ok!(st.version.require_ton(11..));
+        let stack = SafeRc::make_mut(&mut st.stack);
+        ok!(get_and_push_param(
+            &mut st.cr,
+            stack,
+            SmcInfoTonV11::IN_MSG_PARAMS_IDX
+        ));
+        Ok(0)
+    }
+
+    #[op(code = "f8ssss @ f88100..f88111", fmt = "GETPARAMLONG {s}", args(s = args & 255))]
+    #[op(code = "f8ssss @ f88112..f881ff", fmt = "GETPARAMLONG {s}", args(s = args & 255))]
+    fn exec_get_param_long(st: &mut VmState, s: u32) -> VmResult<i32> {
+        ok!(st.version.require_ton(11..));
+        let stack = SafeRc::make_mut(&mut st.stack);
+        ok!(get_and_push_param(&mut st.cr, stack, s as usize));
+        Ok(0)
+    }
+
+    #[op(code = "f8ss @ f890..f8a0", fmt = DisplayInMsgParamArgs(s), args(s = args & 15))]
+    fn exec_get_in_msg_param(st: &mut VmState, s: u32) -> VmResult<i32> {
+        ok!(st.version.require_ton(11..));
+        let stack = SafeRc::make_mut(&mut st.stack);
+        ok!(get_and_push_in_msg_param(&mut st.cr, stack, s as usize));
         Ok(0)
     }
 
@@ -324,6 +353,27 @@ impl ConfigOps {
     }
 }
 
+pub struct DisplayInMsgParamArgs(u32);
+
+impl std::fmt::Display for DisplayInMsgParamArgs {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        let code = match self.0 {
+            0 => "INMSG_BOUNCE",
+            1 => "INMSG_BOUNCED",
+            2 => "INMSG_SRC",
+            3 => "INMSG_FWDFEE",
+            4 => "INMSG_LT",
+            5 => "INMSG_UTIME",
+            6 => "INMSG_ORIGVALUE",
+            7 => "INMSG_VALUE",
+            8 => "INMSG_VALUEEXTRA",
+            9 => "INMSG_STATEINIT",
+            i => return write!(f, "INMSGPARAM {i}"),
+        };
+        write!(f, "{}", code)
+    }
+}
+
 pub struct DisplayConfigOpsArgs(u32);
 
 impl std::fmt::Display for DisplayConfigOpsArgs {
@@ -399,6 +449,20 @@ fn set_global_common(
 
 fn get_and_push_param(regs: &mut ControlRegs, stack: &mut Stack, index: usize) -> VmResult<i32> {
     let param = ok!(regs.get_c7_params().and_then(|t| t.try_get(index)));
+    ok!(stack.push_raw(param.clone()));
+    Ok(0)
+}
+
+fn get_and_push_in_msg_param(
+    regs: &mut ControlRegs,
+    stack: &mut Stack,
+    mss_param_index: usize,
+) -> VmResult<i32> {
+    let param = ok!(regs
+        .get_c7_params()
+        .and_then(|t| t.try_get(SmcInfoTonV11::IN_MSG_PARAMS_IDX)));
+    let in_msg_params_tuple = ok!(param.clone().into_tuple());
+    let param = ok!(in_msg_params_tuple.try_get(mss_param_index));
     ok!(stack.push_raw(param.clone()));
     Ok(0)
 }
