@@ -2350,25 +2350,28 @@ mod tests {
     #[test]
     #[traced_test]
     fn runvm_flags_1_2() {
-        // PROGRAM{
-        //  22 DECLMETHOD foo
-        //  DECLPROC main
-        //  foo PROC:<{
-        //    MUL
-        //  }>
-        //  main PROC:<{
-        //    DUP
-        //    foo CALLDICT
-        //    INC
-        //  }>
-        // }END>s
-
         // === flag +1: same c3 ===
 
         assert_run_vm!(
             r#"
-            INT 10 INT 0 INT 2 PUSHSLICE te6ccgEBBAEAHgABFP8A9KQT9LzyyAsBAgLOAwIABaNUQAAJ0IPAWpI= RUNVM 1
-            INT 10 INT 0 INT 2 PUSHSLICE te6ccgEBBAEAHgABFP8A9KQT9LzyyAsBAgLOAwIABaNUQAAJ0IPAWpI= RUNVM 0
+            @define(simpleProg) {
+                SETCP 0
+                DICTPUSHCONST 19, [
+                    0 => {
+                        DUP
+                        CALLDICT 22
+                        INC
+                    }
+                    22 => {
+                        MUL
+                    }
+                ]
+                DICTIGETJMPZ
+                THROWARG 11
+            }
+
+            INT 10 INT 0 INT 2 PUSHSLICE @use(simpleProg) RUNVM 1
+            INT 10 INT 0 INT 2 PUSHSLICE @use(simpleProg) RUNVM 0
             "#,
             [] => [int 101, int 0, int 22, int 11],
         );
@@ -2376,7 +2379,21 @@ mod tests {
         // === flag +2(+1): push0 ===
 
         assert_run_vm!(
-            "INT 10 INT 1 PUSHSLICE te6ccgEBBAEAHgABFP8A9KQT9LzyyAsBAgLOAwIABaNUQAAJ0IPAWpI= RUNVM 3",
+            "INT 10 INT 1 PUSHSLICE {
+                SETCP 0
+                DICTPUSHCONST 19, [
+                    0 => {
+                        DUP
+                        CALLDICT 22
+                        INC
+                    }
+                    22 => {
+                        MUL
+                    }
+                ]
+                DICTIGETJMPZ
+                THROWARG 11
+            } RUNVM 3",
             [] => [int 101, int 0]
         );
     }
@@ -2570,7 +2587,7 @@ mod tests {
     fn runvm_compute_big() {
         assert_run_vm!(
             r#"
-            PUSHSLICE {
+            @define(slice) {
                 DUP EQINT 0
                 PUSHCONT {
                     DROP DROP
@@ -2582,21 +2599,10 @@ mod tests {
                 RUNVM 0 THROWIF 11
                 ADD NIP
             }
+            PUSHSLICE @use(slice)
             INT 10000
             INT 2
-            PUSHSLICE {
-                DUP EQINT 0
-                PUSHCONT {
-                    DROP DROP
-                    ZERO
-                } IFJMP
-                OVER OVER DEC
-                INT 2
-                PUSH s2
-                RUNVM 0 THROWIF 11
-                ADD NIP
-            }
-            RUNVM 0
+            PUSHSLICE @use(slice) RUNVM 0
             "#,
             gas: 10000000,
             [] => [int 50005000, int 0],
@@ -2604,7 +2610,7 @@ mod tests {
 
         assert_run_vm!(
             r#"
-            PUSHSLICE {
+            @define(slice) {
                 DUP EQINT 0
                 PUSHCONT {
                     DROP DROP
@@ -2616,21 +2622,10 @@ mod tests {
                 RUNVM 0 THROWIF 11
                 ADD NIP
             }
+            PUSHSLICE @use(slice)
             INT 10000
             INT 2
-            PUSHSLICE {
-                DUP EQINT 0
-                PUSHCONT {
-                    DROP DROP
-                    ZERO
-                } IFJMP
-                OVER OVER DEC
-                INT 2
-                PUSH s2
-                RUNVM 0 THROWIF 11
-                ADD NIP
-            }
-            RUNVM 0
+            PUSHSLICE @use(slice) RUNVM 0
             "#,
             gas: 100000,
             [] => [int 100001],

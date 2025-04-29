@@ -39,7 +39,7 @@ tracing = "0.1"
 tracing-subscriber = "0.3"
 tracing-test = "0.2"
 
-everscale-asm-macros = { git = "https://github.com/broxus/everscale-asm.git", rev = "5de14dcc81372be79b67cff4f0bc05914194d08a" }
+everscale-asm-macros = { git = "https://github.com/broxus/everscale-asm.git", rev = "a5936d1613e7b943649a15e2e72ddd62f2992976" }
 
 tycho-vm = { path = "./vm" }
 
