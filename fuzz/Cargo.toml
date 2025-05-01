@@ -15,6 +15,20 @@ doc = false
 bench = false
 
 [[bin]]
+name = "vm_asm"
+path = "fuzz_targets/vm_asm.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "vm_opcode"
+path = "fuzz_targets/vm_opcode_fuzz.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
 name = "action_phase_real"
 path = "fuzz_targets/action_phase_real.rs"
 test = false
@@ -34,3 +48,5 @@ everscale-types = { workspace = true, features = ["arbitrary", "base64"] }
 libfuzzer-sys = { workspace = true }
 tycho-executor = { path = "../executor" }
 tycho-vm = { path = "../vm", features = ["arbitrary"] }
+everscale-asm = { workspace = true }
+num-bigint = "0.4.6"
