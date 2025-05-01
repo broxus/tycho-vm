@@ -106,7 +106,13 @@ impl RandOps {
         SafeRc::make_mut(&mut c7)[0] = Stack::make_null();
 
         let mut t1v = t1v.into_tuple().expect("t1 was checked as tuple");
-        SafeRc::make_mut(&mut t1v)[SmcInfoBase::RANDSEED_IDX] = int.into_dyn_value();
+        {
+            let t1v = SafeRc::make_mut(&mut t1v);
+            if t1v.len() <= SmcInfoBase::RANDSEED_IDX {
+                t1v.resize_with(SmcInfoBase::RANDSEED_IDX + 1, Stack::make_null);
+            }
+            t1v[SmcInfoBase::RANDSEED_IDX] = int.into_dyn_value();
+        }
         let t1_len = t1v.len();
 
         // NOTE: Restore c7 and control registers state.
@@ -207,6 +213,15 @@ pub mod test {
     #[test]
     #[traced_test]
     fn random() {
+        assert_run_vm!("INT 123 RAND", c7: tuple![], [] => [int 0], exit_code: 7);
+        assert_run_vm!("INT 123 RAND", c7: tuple![[]], [] => [int 0], exit_code: 7);
+
+        assert_run_vm!("INT 123 SETRAND", c7: tuple![], [] => [int 0], exit_code: 7);
+        assert_run_vm!("INT 123 SETRAND", c7: tuple![[]], [] => [], exit_code: 0);
+
+        assert_run_vm!("INT 123 ADDRAND", c7: tuple![], [] => [int 0], exit_code: 7);
+        assert_run_vm!("INT 123 ADDRAND", c7: tuple![[]], [] => [int 0], exit_code: 7);
+
         let value = uint256("576f8d6b5ac3bcc80844b7d50b1cc6603444bbe7cfcf8fc0aa1ee3c636d9e339");
         let c7 = tuple![[
             null,              // 0
