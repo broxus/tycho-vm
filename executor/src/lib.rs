@@ -726,7 +726,6 @@ fn build_out_msgs(out_msgs: &[Lazy<OwnedMessage>]) -> Result<Dict<Uint15, Cell>,
             .iter()
             .enumerate()
             .map(|(i, msg)| (Uint15::new(i as _), msg.inner().clone())),
-        15,
         Cell::empty_context(),
     )
     .map(Dict::from_raw)

@@ -44,4 +44,4 @@ everscale-asm-macros = { git = "https://github.com/broxus/everscale-asm.git", re
 tycho-vm = { path = "./vm" }
 
 [patch.crates-io]
-everscale-types = { git = "https://github.com/broxus/everscale-types.git", rev = "82c343b2bd17ceb51db0575b6b8ee821ccda037e" }
+everscale-types = { git = "https://github.com/broxus/everscale-types.git", rev = "b55da379aba126d4496c88bc7b8cc7af553ab37a" }

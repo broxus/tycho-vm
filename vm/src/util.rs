@@ -112,19 +112,30 @@ pub struct Uint4(pub usize);
 
 impl DictKey for Uint4 {
     const BITS: u16 = 4;
+}
 
+impl LoadDictKey for Uint4 {
     #[inline]
-    fn from_raw_data(raw_data: &[u8; 128]) -> Option<Self> {
+    fn load_from_data(data: &CellDataBuilder) -> Option<Self> {
+        let raw_data = data.raw_data();
         Some(Self((raw_data[0] & 0xf) as usize))
     }
 }
 
-impl Store for Uint4 {
-    fn store_into(&self, builder: &mut CellBuilder, _: &dyn CellContext) -> Result<(), Error> {
+impl StoreDictKey for Uint4 {
+    #[inline]
+    fn store_into_data(&self, data: &mut CellDataBuilder) -> Result<(), Error> {
         if self.0 > 0xf {
             return Err(Error::IntOverflow);
         }
-        builder.store_small_uint(self.0 as _, 4)
+        data.store_small_uint(self.0 as _, 4)
+    }
+}
+
+impl Store for Uint4 {
+    #[inline]
+    fn store_into(&self, builder: &mut CellBuilder, _: &dyn CellContext) -> Result<(), Error> {
+        self.store_into_data(builder.as_mut())
     }
 }
 

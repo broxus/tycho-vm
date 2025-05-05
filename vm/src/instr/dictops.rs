@@ -498,7 +498,9 @@ impl DictOps {
             };
 
             ok!(stack.push(OwnedCellSlice::from(value)));
-            ok!(stack.push(OwnedCellSlice::new_allow_exotic(key.build_ext(ctx)?)));
+            ok!(stack.push(OwnedCellSlice::new_allow_exotic(
+                CellBuilder::from(key).build_ext(ctx)?
+            )));
         }
 
         ok!(stack.push_bool(true));
@@ -561,7 +563,9 @@ impl DictOps {
         if s.is_int() {
             ok!(stack.push(load_int_from_slice(&mut key.as_data_slice(), n, signed)?));
         } else {
-            ok!(stack.push(OwnedCellSlice::new_allow_exotic(key.build_ext(ctx)?)));
+            ok!(stack.push(OwnedCellSlice::new_allow_exotic(
+                CellBuilder::from(key).build_ext(ctx)?
+            )));
         }
         ok!(stack.push_bool(true));
         Ok(0)
