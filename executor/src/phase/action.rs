@@ -795,7 +795,7 @@ impl ExecutorState<'_> {
     fn do_change_library(
         &self,
         mode: ChangeLibraryMode,
-        lib: LibRef,
+        mut lib: LibRef,
         ctx: &mut ActionContext<'_>,
     ) -> Result<(), ActionFailed> {
         // Having both "ADD_PRIVATE" and "ADD_PUBLIC" flags is invalid.
@@ -825,6 +825,9 @@ impl ExecutorState<'_> {
                     // Do nothing if library already exists with the same `public` flag.
                     ctx.action_phase.special_actions += 1;
                     return Ok(());
+                } else {
+                    // If library exists allow changing its `public` flag when `LibRef::Hash` was used.
+                    lib = LibRef::Cell(prev.root);
                 }
             }
 
