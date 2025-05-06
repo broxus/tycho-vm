@@ -15,7 +15,7 @@ impl ExecutorState<'_> {
         &mut self,
         is_external: bool,
         msg_root: Cell,
-        inspector: Option<&mut ExecutorInspector<'_>>,
+        mut inspector: Option<&mut ExecutorInspector<'_>>,
     ) -> TxResult<OrdinaryTxInfo> {
         // Receive inbound message.
         let mut msg = match self.receive_in_msg(msg_root) {
@@ -78,7 +78,7 @@ impl ExecutorState<'_> {
                 input: TransactionInput::Ordinary(&msg),
                 storage_fee: storage_phase.storage_fees_collected,
                 force_accept: false,
-                inspector,
+                inspector: inspector.as_deref_mut(),
             })
             .context("compute phase failed")?;
 
@@ -103,6 +103,7 @@ impl ExecutorState<'_> {
                         new_state,
                         actions,
                         compute_phase,
+                        inspector,
                     })
                     .context("action phase failed")?;
 

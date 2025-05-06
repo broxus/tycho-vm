@@ -63,6 +63,7 @@ fuzz_target!(|input: Input| {
             new_state: Default::default(),
             actions: input.actions.into(),
             compute_phase: &compute_phase,
+            inspector: None,
         })
         .unwrap();
 

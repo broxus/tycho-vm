@@ -12,7 +12,7 @@ impl ExecutorState<'_> {
     pub fn run_tick_tock_transaction(
         &mut self,
         kind: TickTock,
-        inspector: Option<&mut ExecutorInspector<'_>>,
+        mut inspector: Option<&mut ExecutorInspector<'_>>,
     ) -> TxResult<TickTockTxInfo> {
         if self.state.status() != AccountStatus::Active {
             // Skip ticktock transactions for inactive accounts.
@@ -39,7 +39,7 @@ impl ExecutorState<'_> {
                 input: TransactionInput::TickTock(kind),
                 storage_fee: storage_phase.storage_fees_collected,
                 force_accept: false,
-                inspector,
+                inspector: inspector.as_deref_mut(),
             })
             .context("compute phase failed")?;
 
@@ -56,6 +56,7 @@ impl ExecutorState<'_> {
                         new_state,
                         actions,
                         compute_phase,
+                        inspector,
                     })
                     .context("action phase failed")?;
 

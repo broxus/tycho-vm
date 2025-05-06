@@ -15,10 +15,10 @@ use crate::util::{
     check_rewrite_dst_addr, check_rewrite_src_addr, check_state_limits, check_state_limits_diff,
     ExtStorageStat, StateLimitsResult, StorageStatLimits,
 };
-use crate::ExecutorState;
+use crate::{ExecutorInspector, ExecutorState, PublicLibraryChange};
 
 /// Action phase input context.
-pub struct ActionPhaseContext<'a> {
+pub struct ActionPhaseContext<'a, 'e> {
     /// Received message (external or internal).
     pub received_message: Option<&'a mut ReceivedMessage>,
     /// Original account balance before the compute phase.
@@ -29,6 +29,8 @@ pub struct ActionPhaseContext<'a> {
     pub actions: Cell,
     /// Successfully executed compute phase.
     pub compute_phase: &'a ExecutedComputePhase,
+    /// Executor inspector.
+    pub inspector: Option<&'a mut ExecutorInspector<'e>>,
 }
 
 /// Executed action phase with additional info.
@@ -45,7 +47,7 @@ pub struct ActionPhaseFull {
 }
 
 impl ExecutorState<'_> {
-    pub fn action_phase(&mut self, mut ctx: ActionPhaseContext<'_>) -> Result<ActionPhaseFull> {
+    pub fn action_phase(&mut self, mut ctx: ActionPhaseContext<'_, '_>) -> Result<ActionPhaseFull> {
         const MAX_ACTIONS: u16 = 255;
 
         let mut res = ActionPhaseFull {
@@ -169,6 +171,7 @@ impl ExecutorState<'_> {
             end_lt: self.end_lt,
             out_msgs: Vec::new(),
             delete_account: false,
+            public_libs_diff: ctx.inspector.is_some().then(Vec::new),
             compute_phase: ctx.compute_phase,
             action_phase: &mut res.action_phase,
         };
@@ -317,6 +320,10 @@ impl ExecutorState<'_> {
             self.total_fees.try_add_assign(fees)?;
         }
         self.balance = action_ctx.remaining_balance;
+
+        if let Some(inspector) = ctx.inspector {
+            inspector.public_libs_diff = action_ctx.public_libs_diff.unwrap_or_default();
+        }
 
         self.out_msgs = action_ctx.out_msgs;
         self.end_lt = action_ctx.end_lt;
@@ -817,9 +824,12 @@ impl ExecutorState<'_> {
             LibRef::Hash(hash) => hash,
         };
 
+        let is_masterchain = self.address.is_masterchain();
+
         let add_public = mode.contains(ChangeLibraryMode::ADD_PUBLIC);
         if add_public || mode.contains(ChangeLibraryMode::ADD_PRIVATE) {
             // Add new library.
+            let mut was_public = None;
             if let Ok(Some(prev)) = ctx.new_state.libraries.get(hash) {
                 if prev.public == add_public {
                     // Do nothing if library already exists with the same `public` flag.
@@ -827,6 +837,7 @@ impl ExecutorState<'_> {
                     return Ok(());
                 } else {
                     // If library exists allow changing its `public` flag when `LibRef::Hash` was used.
+                    was_public = Some(prev.public);
                     lib = LibRef::Cell(prev.root);
                 }
             }
@@ -846,23 +857,48 @@ impl ExecutorState<'_> {
             }
 
             // Add library.
-            if ctx
-                .new_state
-                .libraries
-                .set(*root.repr_hash(), SimpleLib {
-                    public: add_public,
-                    root,
-                })
-                .is_err()
-            {
-                ctx.action_phase.result_code = ResultCode::InvalidLibrariesDict as i32;
-                return Err(ActionFailed);
+            match ctx.new_state.libraries.set(*root.repr_hash(), SimpleLib {
+                public: add_public,
+                root: root.clone(),
+            }) {
+                // Track removed public libs by an inspector for masterchain accounts.
+                Ok(_) if is_masterchain => {
+                    // Track removed or added public libs by an inspector.
+                    if let Some(diff) = &mut ctx.public_libs_diff {
+                        match (was_public, add_public) {
+                            // Add new public libraries.
+                            (None, true) | (Some(false), true) => {
+                                diff.push(PublicLibraryChange::Add(root))
+                            }
+                            // Remove public libraries
+                            (Some(true), false) => {
+                                diff.push(PublicLibraryChange::Remove(*root.repr_hash()));
+                            }
+                            // Ignore unchanged or private libraries.
+                            _ => {}
+                        }
+                    }
+                }
+                Ok(_) => {}
+                Err(_) => {
+                    ctx.action_phase.result_code = ResultCode::InvalidLibrariesDict as i32;
+                    return Err(ActionFailed);
+                }
             }
         } else {
             // Remove library.
-            if ctx.new_state.libraries.remove(hash).is_err() {
-                ctx.action_phase.result_code = ResultCode::InvalidLibrariesDict as i32;
-                return Err(ActionFailed);
+            match ctx.new_state.libraries.remove(hash) {
+                // Track removed public libs by an inspector for masterchain accounts.
+                Ok(Some(lib)) if is_masterchain && lib.public => {
+                    if let Some(diff) = &mut ctx.public_libs_diff {
+                        diff.push(PublicLibraryChange::Remove(*hash));
+                    }
+                }
+                Ok(_) => {}
+                Err(_) => {
+                    ctx.action_phase.result_code = ResultCode::InvalidLibrariesDict as i32;
+                    return Err(ActionFailed);
+                }
             }
         }
 
@@ -886,6 +922,7 @@ struct ActionContext<'a> {
     end_lt: u64,
     out_msgs: Vec<Lazy<OwnedMessage>>,
     delete_account: bool,
+    public_libs_diff: Option<Vec<PublicLibraryChange>>,
 
     compute_phase: &'a ExecutedComputePhase,
     action_phase: &'a mut ActionPhase,
@@ -1321,6 +1358,7 @@ mod tests {
             new_state: StateInit::default(),
             actions: Cell::empty_cell(),
             compute_phase: &compute_phase,
+            inspector: None,
         })?;
 
         assert_eq!(action_phase, empty_action_phase());
@@ -1362,6 +1400,7 @@ mod tests {
             new_state: StateInit::default(),
             actions: actions.clone(),
             compute_phase: &compute_phase,
+            inspector: None,
         })?;
 
         assert_eq!(action_phase, ActionPhase {
@@ -1410,6 +1449,7 @@ mod tests {
             new_state: StateInit::default(),
             actions: actions.clone(),
             compute_phase: &compute_phase,
+            inspector: None,
         })?;
 
         assert_eq!(action_phase, ActionPhase {
@@ -1473,6 +1513,7 @@ mod tests {
             new_state: StateInit::default(),
             actions: actions.clone(),
             compute_phase: &compute_phase,
+            inspector: None,
         })?;
 
         assert_eq!(action_phase, ActionPhase {
@@ -1524,6 +1565,7 @@ mod tests {
             new_state: StateInit::default(),
             actions: actions.clone(),
             compute_phase: &compute_phase,
+            inspector: None,
         })?;
 
         assert_eq!(action_phase, ActionPhase {
@@ -1581,6 +1623,7 @@ mod tests {
             new_state: StateInit::default(),
             actions: actions.clone(),
             compute_phase: &compute_phase,
+            inspector: None,
         })?;
 
         assert_eq!(action_fine, Tokens::ZERO);
@@ -1667,6 +1710,7 @@ mod tests {
             new_state: StateInit::default(),
             actions: actions.clone(),
             compute_phase: &compute_phase,
+            inspector: None,
         })?;
 
         assert_eq!(action_fine, Tokens::ZERO);
@@ -1766,6 +1810,7 @@ mod tests {
             new_state: StateInit::default(),
             actions: actions.clone(),
             compute_phase: &compute_phase,
+            inspector: None,
         })?;
 
         assert_eq!(action_fine, Tokens::ZERO);
@@ -1920,6 +1965,7 @@ mod tests {
                 new_state: StateInit::default(),
                 actions: actions.clone(),
                 compute_phase: &compute_phase,
+                inspector: None,
             })?;
 
             assert_eq!(action_fine, Tokens::ZERO);
@@ -2021,6 +2067,7 @@ mod tests {
             new_state: StateInit::default(),
             actions: actions.clone(),
             compute_phase: &compute_phase,
+            inspector: None,
         })?;
 
         assert_eq!(state.out_msgs.len(), 1);
@@ -2122,6 +2169,7 @@ mod tests {
             new_state,
             actions: actions.clone(),
             compute_phase: &compute_phase,
+            inspector: None,
         })?;
 
         assert_eq!(action_phase, ActionPhase {
@@ -2203,6 +2251,7 @@ mod tests {
                 new_state: StateInit::default(),
                 actions: actions.clone(),
                 compute_phase: &compute_phase,
+                inspector: None,
             })?;
 
             assert_eq!(action_phase, ActionPhase {
@@ -2267,6 +2316,7 @@ mod tests {
             new_state: StateInit::default(),
             actions: actions.clone(),
             compute_phase: &compute_phase,
+            inspector: None,
         })?;
 
         assert_eq!(action_phase, ActionPhase {
@@ -2335,6 +2385,7 @@ mod tests {
             new_state: StateInit::default(),
             actions: actions.clone(),
             compute_phase: &compute_phase,
+            inspector: None,
         })?;
 
         assert_eq!(state.out_msgs.len(), 1);
@@ -2382,6 +2433,255 @@ mod tests {
             state.balance.tokens,
             prev_balance.tokens - info.value.tokens - expected_fwd_fees
         );
+        Ok(())
+    }
+
+    #[test]
+    fn change_lib() -> Result<()> {
+        struct TestCase {
+            libraries: Dict<HashBytes, SimpleLib>,
+            target: Dict<HashBytes, SimpleLib>,
+            changes: Vec<(ChangeLibraryMode, LibRef)>,
+            diff: Vec<PublicLibraryChange>,
+        }
+
+        fn make_lib(id: u32) -> Cell {
+            CellBuilder::build_from(id).unwrap()
+        }
+
+        fn make_lib_hash(id: u32) -> HashBytes {
+            *CellBuilder::build_from(id).unwrap().repr_hash()
+        }
+
+        fn make_libs<I>(items: I) -> Dict<HashBytes, SimpleLib>
+        where
+            I: IntoIterator<Item = (u32, bool)>,
+        {
+            let mut items = items
+                .into_iter()
+                .map(|(id, public)| {
+                    let root = make_lib(id);
+                    (*root.repr_hash(), SimpleLib { root, public })
+                })
+                .collect::<Vec<_>>();
+            items.sort_by(|(a, _), (b, _)| a.cmp(b));
+            Dict::try_from_sorted_slice(&items).unwrap()
+        }
+
+        let params = make_default_params();
+        let config = make_default_config();
+
+        let test_cases = vec![
+            // The simplest case with no libs.
+            TestCase {
+                libraries: Dict::new(),
+                target: Dict::new(),
+                changes: Vec::new(),
+                diff: Vec::new(),
+            },
+            // Add private libs.
+            TestCase {
+                libraries: Dict::new(),
+                target: make_libs([(123, false)]),
+                changes: vec![(ChangeLibraryMode::ADD_PRIVATE, LibRef::Cell(make_lib(123)))],
+                diff: Vec::new(),
+            },
+            TestCase {
+                libraries: Dict::new(),
+                target: make_libs([(123, false), (234, false)]),
+                changes: vec![
+                    (ChangeLibraryMode::ADD_PRIVATE, LibRef::Cell(make_lib(123))),
+                    (ChangeLibraryMode::ADD_PRIVATE, LibRef::Cell(make_lib(234))),
+                ],
+                diff: Vec::new(),
+            },
+            TestCase {
+                libraries: make_libs([(123, false)]),
+                target: make_libs([(123, false)]),
+                changes: vec![(ChangeLibraryMode::ADD_PRIVATE, LibRef::Cell(make_lib(123)))],
+                diff: Vec::new(),
+            },
+            TestCase {
+                libraries: make_libs([(123, false)]),
+                target: make_libs([(123, false)]),
+                changes: vec![(
+                    ChangeLibraryMode::ADD_PRIVATE,
+                    LibRef::Hash(make_lib_hash(123)),
+                )],
+                diff: Vec::new(),
+            },
+            // Add public libs.
+            TestCase {
+                libraries: Dict::new(),
+                target: make_libs([(123, true)]),
+                changes: vec![(ChangeLibraryMode::ADD_PUBLIC, LibRef::Cell(make_lib(123)))],
+                diff: vec![PublicLibraryChange::Add(make_lib(123))],
+            },
+            TestCase {
+                libraries: Dict::new(),
+                target: make_libs([(123, true), (234, true)]),
+                changes: vec![
+                    (ChangeLibraryMode::ADD_PUBLIC, LibRef::Cell(make_lib(123))),
+                    (ChangeLibraryMode::ADD_PUBLIC, LibRef::Cell(make_lib(234))),
+                ],
+                diff: vec![
+                    PublicLibraryChange::Add(make_lib(123)),
+                    PublicLibraryChange::Add(make_lib(234)),
+                ],
+            },
+            TestCase {
+                libraries: make_libs([(123, true)]),
+                target: make_libs([(123, true)]),
+                changes: vec![(ChangeLibraryMode::ADD_PUBLIC, LibRef::Cell(make_lib(123)))],
+                diff: Vec::new(),
+            },
+            TestCase {
+                libraries: make_libs([(123, true)]),
+                target: make_libs([(123, true)]),
+                changes: vec![(
+                    ChangeLibraryMode::ADD_PUBLIC,
+                    LibRef::Hash(make_lib_hash(123)),
+                )],
+                diff: Vec::new(),
+            },
+            // Remove public libs.
+            TestCase {
+                libraries: Dict::new(),
+                target: Dict::new(),
+                // Non-existing by cell.
+                changes: vec![(ChangeLibraryMode::REMOVE, LibRef::Cell(make_lib(123)))],
+                diff: Vec::new(),
+            },
+            TestCase {
+                libraries: Dict::new(),
+                target: Dict::new(),
+                // Non-existing by hash.
+                changes: vec![(ChangeLibraryMode::REMOVE, LibRef::Hash(make_lib_hash(123)))],
+                diff: Vec::new(),
+            },
+            TestCase {
+                libraries: make_libs([(123, false)]),
+                target: Dict::new(),
+                changes: vec![(ChangeLibraryMode::REMOVE, LibRef::Cell(make_lib(123)))],
+                diff: Vec::new(),
+            },
+            TestCase {
+                libraries: make_libs([(123, false)]),
+                target: Dict::new(),
+                changes: vec![(ChangeLibraryMode::REMOVE, LibRef::Hash(make_lib_hash(123)))],
+                diff: Vec::new(),
+            },
+            TestCase {
+                libraries: make_libs([(123, true)]),
+                target: Dict::new(),
+                changes: vec![(ChangeLibraryMode::REMOVE, LibRef::Cell(make_lib(123)))],
+                diff: vec![PublicLibraryChange::Remove(make_lib_hash(123))],
+            },
+            // Update public libs.
+            TestCase {
+                libraries: make_libs([(123, false)]),
+                target: make_libs([(123, true)]),
+                changes: vec![(ChangeLibraryMode::ADD_PUBLIC, LibRef::Cell(make_lib(123)))],
+                diff: vec![PublicLibraryChange::Add(make_lib(123))],
+            },
+            TestCase {
+                libraries: make_libs([(123, false)]),
+                target: make_libs([(123, true)]),
+                changes: vec![(
+                    ChangeLibraryMode::ADD_PUBLIC,
+                    LibRef::Hash(make_lib_hash(123)),
+                )],
+                diff: vec![PublicLibraryChange::Add(make_lib(123))],
+            },
+            TestCase {
+                libraries: make_libs([(123, true)]),
+                target: make_libs([(123, false)]),
+                changes: vec![(ChangeLibraryMode::ADD_PRIVATE, LibRef::Cell(make_lib(123)))],
+                diff: vec![PublicLibraryChange::Remove(make_lib_hash(123))],
+            },
+            TestCase {
+                libraries: make_libs([(123, true)]),
+                target: make_libs([(123, false)]),
+                changes: vec![(
+                    ChangeLibraryMode::ADD_PRIVATE,
+                    LibRef::Hash(make_lib_hash(123)),
+                )],
+                diff: vec![PublicLibraryChange::Remove(make_lib_hash(123))],
+            },
+        ];
+
+        for TestCase {
+            libraries,
+            target,
+            changes,
+            diff,
+        } in test_cases
+        {
+            let mut state = ExecutorState::new_active(
+                &params,
+                &config,
+                &StdAddr::new(-1, HashBytes::ZERO),
+                OK_BALANCE,
+                Cell::empty_cell(),
+                tvmasm!("ACCEPT"),
+            );
+
+            let target_state_init = match &mut state.state {
+                AccountState::Active(state_init) => {
+                    state_init.libraries = libraries;
+                    StateInit {
+                        libraries: target,
+                        ..state_init.clone()
+                    }
+                }
+                AccountState::Uninit | AccountState::Frozen(..) => panic!("invalid initial state"),
+            };
+
+            let compute_phase = stub_compute_phase(OK_GAS);
+            let prev_total_fees = state.total_fees;
+            let prev_balance = state.balance.clone();
+
+            let change_count = changes.len();
+            let actions = make_action_list(
+                changes
+                    .into_iter()
+                    .map(|(mode, lib)| OutAction::ChangeLibrary { mode, lib }),
+            );
+
+            let mut inspector = ExecutorInspector::default();
+
+            let ActionPhaseFull {
+                action_phase,
+                action_fine,
+                state_exceeds_limits,
+                bounce,
+            } = state.action_phase(ActionPhaseContext {
+                received_message: None,
+                original_balance: original_balance(&state, &compute_phase),
+                new_state: match state.state.clone() {
+                    AccountState::Active(state_init) => state_init,
+                    AccountState::Uninit | AccountState::Frozen(..) => Default::default(),
+                },
+                actions: actions.clone(),
+                compute_phase: &compute_phase,
+                inspector: Some(&mut inspector),
+            })?;
+
+            assert_eq!(action_phase, ActionPhase {
+                total_actions: change_count as u16,
+                special_actions: change_count as u16,
+                action_list_hash: *actions.repr_hash(),
+                ..empty_action_phase()
+            });
+            assert_eq!(action_fine, Tokens::ZERO);
+            assert!(!state_exceeds_limits);
+            assert!(!bounce);
+            assert_eq!(state.end_status, AccountStatus::Active);
+            assert_eq!(state.state, AccountState::Active(target_state_init));
+            assert_eq!(state.total_fees, prev_total_fees);
+            assert_eq!(state.balance, prev_balance);
+            assert_eq!(inspector.public_libs_diff, diff);
+        }
         Ok(())
     }
 }

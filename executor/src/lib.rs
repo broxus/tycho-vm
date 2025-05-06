@@ -198,10 +198,32 @@ impl<'a> Executor<'a> {
 pub struct ExecutorInspector<'e> {
     /// Actions list from compute phase.
     pub actions: Option<Cell>,
+    /// A set of changes of the public libraries dict.
+    ///
+    /// NOTE: The order is the same as the actions order so
+    /// it can contain duplicates and must be folded before use.
+    pub public_libs_diff: Vec<PublicLibraryChange>,
     /// Compute phase exit code.
     pub exit_code: Option<i32>,
     /// Debug output target.
     pub debug: Option<&'e mut dyn std::fmt::Write>,
+}
+
+/// Public library diff operation.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PublicLibraryChange {
+    Add(Cell),
+    Remove(HashBytes),
+}
+
+impl PublicLibraryChange {
+    /// Returns a hash of the changed library.
+    pub fn lib_hash(&self) -> &HashBytes {
+        match self {
+            Self::Add(cell) => cell.repr_hash(),
+            Self::Remove(hash) => hash,
+        }
+    }
 }
 
 /// Shared state for executor phases.
