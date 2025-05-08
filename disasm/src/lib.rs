@@ -6,7 +6,7 @@ use anyhow::Result;
 use everscale_types::prelude::*;
 use num_bigint::BigInt;
 use smol_str::SmolStr;
-use tycho_vm::{load_int_from_slice, DumpError, DumpOutput, DumpResult};
+use tycho_vm::{DumpError, DumpOutput, DumpResult};
 
 pub use self::models::{
     Code, CodeBlock, CodeBlockTail, Data, DataBlock, Item, ItemId, JumpTable, Library, Opcode,
@@ -356,7 +356,7 @@ impl Resources {
                 if (|| {
                     for item in everscale_types::dict::RawOwnedIter::new(&Some(root), n) {
                         let (key, value) = item?;
-                        let key = load_int_from_slice(&mut key.as_data_slice(), n, true)?;
+                        let key = key.as_data_slice().load_bigint(n, true)?;
 
                         let save_to = SaveTo {
                             jump_table_id: id,

@@ -198,7 +198,7 @@ pub use self::state::{
     BehaviourModifiers, CommittedState, InitSelectorParams, IntoCode, ParentVmState, SaveCr,
     VmState, VmStateBuilder,
 };
-pub use self::util::{load_int_from_slice, store_int_to_builder, OwnedCellSlice};
+pub use self::util::OwnedCellSlice;
 
 #[macro_use]
 mod log;

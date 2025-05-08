@@ -1,3 +1,4 @@
+use everscale_types::prelude::*;
 use num_bigint::{BigInt, Sign};
 use num_traits::{One, Zero};
 use tycho_vm_proc::vm_module;
@@ -5,7 +6,6 @@ use tycho_vm_proc::vm_module;
 use crate::error::VmResult;
 use crate::saferc::SafeRc;
 use crate::state::VmState;
-use crate::util::{bitsize, in_bitsize_range};
 
 pub struct LogicOps;
 
@@ -170,7 +170,7 @@ impl LogicOps {
     fn exec_fits_tinyint8(st: &mut VmState, y: u32, s: bool, quiet: bool) -> VmResult<i32> {
         let stack = SafeRc::make_mut(&mut st.stack);
         match ok!(stack.pop_int_or_nan()) {
-            Some(x) if in_bitsize_range(&x, s) && bitsize(&x, s) as u32 <= y => {
+            Some(x) if x.has_correct_sign(s) && x.bitsize(s) as u32 <= y => {
                 ok!(stack.push_raw(x));
             }
             _ if quiet => ok!(stack.push_nan()),
@@ -187,7 +187,7 @@ impl LogicOps {
         let stack = SafeRc::make_mut(&mut st.stack);
         let y = ok!(stack.pop_smallint_range(0, 1023));
         match ok!(stack.pop_int_or_nan()) {
-            Some(x) if in_bitsize_range(&x, s) && bitsize(&x, s) as u32 <= y => {
+            Some(x) if x.has_correct_sign(s) && x.bitsize(s) as u32 <= y => {
                 ok!(stack.push_raw(x));
             }
             _ if quiet => ok!(stack.push_nan()),
@@ -204,7 +204,7 @@ impl LogicOps {
         let stack = SafeRc::make_mut(&mut st.stack);
         match ok!(stack.pop_int_or_nan()) {
             Some(x) => {
-                if !in_bitsize_range(&x, s) {
+                if !x.has_correct_sign(s) {
                     vm_ensure!(quiet, IntegerOutOfRange {
                         min: 0,
                         max: isize::MAX,
@@ -213,7 +213,7 @@ impl LogicOps {
                     ok!(stack.push_nan());
                     return Ok(0);
                 }
-                ok!(stack.push_int(bitsize(&x, s)));
+                ok!(stack.push_int(x.bitsize(s)));
             }
             _ if quiet => ok!(stack.push_nan()),
             _ => vm_bail!(IntegerOverflow),

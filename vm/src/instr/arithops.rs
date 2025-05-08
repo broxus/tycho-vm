@@ -14,7 +14,6 @@ use crate::error::VmResult;
 use crate::error::{DumpError, DumpResult};
 use crate::saferc::SafeRc;
 use crate::state::VmState;
-use crate::util::load_int_from_slice;
 
 pub struct ArithOps;
 
@@ -46,7 +45,7 @@ impl ArithOps {
         st.code.range_mut().skip_first(bits, 0).ok();
 
         let mut cs = st.code.apply();
-        let int = load_int_from_slice(&mut cs, value_len, true)?;
+        let int = cs.load_bigint(value_len, true)?;
         st.code.set_range(cs.range());
 
         vm_log_op!("PUSHINT {int}");
@@ -70,7 +69,7 @@ impl ArithOps {
         }
         code.skip_first(bits, 0)?;
 
-        let int = load_int_from_slice(code, value_len, true)?;
+        let int = code.load_bigint(value_len, true)?;
         f.record_opcode(&format_args!("PUSHINT {int}"))
     }
 

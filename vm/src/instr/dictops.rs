@@ -13,10 +13,7 @@ use crate::error::{DumpError, DumpResult};
 use crate::saferc::SafeRc;
 use crate::stack::RcStackValue;
 use crate::state::VmState;
-use crate::util::{
-    bitsize, in_bitsize_range, load_int_from_slice, store_int_to_builder,
-    store_int_to_builder_unchecked, OwnedCellSlice,
-};
+use crate::util::OwnedCellSlice;
 
 pub struct DictOps;
 
@@ -116,13 +113,13 @@ impl DictOps {
             let int = ok!(stack.pop_int());
 
             let signed = s.is_signed();
-            if !in_bitsize_range(&int, signed) || bitsize(&int, signed) > n {
+            if !int.has_correct_sign(signed) || int.bitsize(signed) > n {
                 ok!(stack.push_bool(false));
                 return Ok(0);
             }
 
-            cb = CellBuilder::new();
-            store_int_to_builder_unchecked(&int, n, signed, &mut cb)?;
+            cb = CellDataBuilder::new();
+            cb.store_bigint_truncate(&int, n, signed)?;
             cb.as_data_slice()
         } else {
             cs = stack.pop_cs()?;
@@ -186,8 +183,8 @@ impl DictOps {
         let mut cb;
         let mut key = if s.is_int() {
             let int = ok!(stack.pop_int());
-            cb = CellBuilder::new();
-            store_int_to_builder(&int, n, s.is_signed(), &mut cb)?;
+            cb = CellDataBuilder::new();
+            cb.store_bigint(&int, n, s.is_signed())?;
             cb.as_data_slice()
         } else {
             cs = stack.pop_cs()?;
@@ -258,8 +255,8 @@ impl DictOps {
         let mut cb;
         let mut key = if s.is_int() {
             let int = ok!(stack.pop_int());
-            cb = CellBuilder::new();
-            store_int_to_builder(&int, n, s.is_signed(), &mut cb)?;
+            cb = CellDataBuilder::new();
+            cb.store_bigint(&int, n, s.is_signed())?;
             cb.as_data_slice()
         } else {
             cs = stack.pop_cs()?;
@@ -309,14 +306,14 @@ impl DictOps {
             let int = ok!(stack.pop_int());
 
             let signed = s.is_signed();
-            if !in_bitsize_range(&int, signed) || bitsize(&int, signed) > n {
+            if !int.has_correct_sign(signed) || int.bitsize(signed) > n {
                 ok!(stack.push_opt_raw(dict));
                 ok!(stack.push_bool(false));
                 return Ok(0);
             }
 
-            cb = CellBuilder::new();
-            store_int_to_builder_unchecked(&int, n, signed, &mut cb)?;
+            cb = CellDataBuilder::new();
+            cb.store_bigint(&int, n, signed)?;
             cb.as_data_slice()
         } else {
             cs = stack.pop_cs()?;
@@ -342,14 +339,14 @@ impl DictOps {
             let int = ok!(stack.pop_int());
 
             let signed = s.is_signed();
-            if !in_bitsize_range(&int, signed) || bitsize(&int, signed) > n {
+            if !int.has_correct_sign(signed) || int.bitsize(signed) > n {
                 ok!(stack.push_opt_raw(dict));
                 ok!(stack.push_bool(false));
                 return Ok(0);
             }
 
-            cb = CellBuilder::new();
-            store_int_to_builder_unchecked(&int, n, signed, &mut cb)?;
+            cb = CellDataBuilder::new();
+            cb.store_bigint(&int, n, signed)?;
             cb.as_data_slice()
         } else {
             cs = stack.pop_cs()?;
@@ -385,13 +382,13 @@ impl DictOps {
             let int = ok!(stack.pop_int());
 
             let signed = s.is_signed();
-            if !in_bitsize_range(&int, signed) || bitsize(&int, signed) > n {
+            if !int.has_correct_sign(signed) || int.bitsize(signed) > n {
                 ok!(stack.push_null());
                 return Ok(0);
             }
 
-            cb = CellBuilder::new();
-            store_int_to_builder_unchecked(&int, n, signed, &mut cb)?;
+            cb = CellDataBuilder::new();
+            cb.store_bigint(&int, n, signed)?;
             cb.as_data_slice()
         } else {
             cs = stack.pop_cs()?;
@@ -414,8 +411,8 @@ impl DictOps {
         let mut cb;
         let mut key = if s.is_int() {
             let int = ok!(stack.pop_int());
-            cb = CellBuilder::new();
-            store_int_to_builder(&int, n, s.is_signed(), &mut cb)?;
+            cb = CellDataBuilder::new();
+            cb.store_bigint(&int, n, s.is_signed())?;
             cb.as_data_slice()
         } else {
             cs = stack.pop_cs()?;
@@ -463,9 +460,9 @@ impl DictOps {
             let int = ok!(stack.pop_int());
 
             let signed = s.is_signed();
-            let nearest = if in_bitsize_range(&int, signed) && bitsize(&int, signed) <= n {
-                let mut cb = CellBuilder::new();
-                store_int_to_builder_unchecked(&int, n, signed, &mut cb)?;
+            let nearest = if int.has_correct_sign(signed) && int.bitsize(signed) <= n {
+                let mut cb = CellDataBuilder::new();
+                cb.store_bigint(&int, n, signed)?;
                 let key = cb.as_data_slice();
                 dict::dict_find_owned(dict.as_deref(), n, key, dir, s.is_eq(), signed, ctx)?
             } else if (int.sign() == Sign::Minus) != s.is_prev() {
@@ -485,7 +482,7 @@ impl DictOps {
             };
 
             ok!(stack.push(OwnedCellSlice::from(value)));
-            ok!(stack.push(load_int_from_slice(&mut key.as_data_slice(), n, signed)?));
+            ok!(stack.push(key.as_data_slice().load_bigint(n, signed)?));
         } else {
             let cs = ok!(stack.pop_cs());
             let key = cs.apply().load_prefix(n, 0)?;
@@ -561,7 +558,7 @@ impl DictOps {
         };
 
         if s.is_int() {
-            ok!(stack.push(load_int_from_slice(&mut key.as_data_slice(), n, signed)?));
+            ok!(stack.push(key.as_data_slice().load_bigint(n, signed)?));
         } else {
             ok!(stack.push(OwnedCellSlice::new_allow_exotic(
                 CellBuilder::from(key).build_ext(ctx)?
@@ -581,12 +578,12 @@ impl DictOps {
 
         'scope: {
             let signed = s.is_signed();
-            if !in_bitsize_range(&idx, signed) || bitsize(&idx, signed) > n {
+            if !idx.has_correct_sign(signed) || idx.bitsize(signed) > n {
                 break 'scope;
             }
 
-            let mut cb = CellBuilder::new();
-            store_int_to_builder_unchecked(&idx, n, signed, &mut cb)?;
+            let mut cb = CellDataBuilder::new();
+            cb.store_bigint(&idx, n, signed)?;
             let key = cb.as_data_slice();
 
             let Some(value) = dict::dict_get_owned(dict.as_deref(), n, key, &st.gas)? else {
@@ -681,7 +678,7 @@ impl DictOps {
     //     let mut cb;
     //     let mut key = if s.is_int() {
     //         let int = ok!(stack.pop_int());
-    //         cb = CellBuilder::new();
+    //         cb = CellDataBuilder::new();
     //         store_int_to_builder(&int, n, s.is_signed(), &mut cb)?;
     //         cb.as_data_slice()
     //     } else {
@@ -942,7 +939,6 @@ fn to_value_ref(mut cs: CellSlice<'_>) -> VmResult<RcStackValue> {
 #[cfg(test)]
 pub mod tests {
     use everscale_types::cell::Lazy;
-    use num_bigint::BigInt;
     use tracing_test::traced_test;
 
     use self::dict::{Dict, DictKey};
@@ -1380,9 +1376,8 @@ pub mod tests {
     }
 
     fn new_slice(value: i32) -> RcStackValue {
-        let value = BigInt::from(value);
         let mut builder = CellBuilder::new();
-        store_int_to_builder(&value, 32, true, &mut builder).unwrap();
+        builder.store_u32(value as u32).unwrap();
         SafeRc::new_dyn_value(OwnedCellSlice::new_allow_exotic(builder.build().unwrap()))
     }
 

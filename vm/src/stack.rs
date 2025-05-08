@@ -9,9 +9,7 @@ use num_traits::{One, ToPrimitive, Zero};
 use crate::cont::{load_cont, Cont, RcCont};
 use crate::error::{VmError, VmResult};
 use crate::saferc::{SafeDelete, SafeRc, SafeRcMakeMut};
-use crate::util::{
-    bitsize, ensure_empty_slice, load_int_from_slice, store_int_to_builder, OwnedCellSlice,
-};
+use crate::util::{ensure_empty_slice, OwnedCellSlice};
 
 /// A stack of values.
 #[derive(Debug, Default, Clone)]
@@ -100,7 +98,7 @@ impl Stack {
                 } else if t / 2 == 0 {
                     // vm_stk_int#0201_ value:int257 = VmStackValue;
                     ok!(slice.skip_first(7, 0));
-                    SafeRc::new_dyn_value(ok!(load_int_from_slice(slice, 257, true)))
+                    SafeRc::new_dyn_value(ok!(slice.load_bigint(257, true)))
                 } else {
                     return Err(Error::InvalidData);
                 }
@@ -246,7 +244,7 @@ impl Stack {
     }
 
     pub fn push_raw_int(&mut self, value: SafeRc<BigInt>, quiet: bool) -> VmResult<()> {
-        if bitsize(&value, true) <= 257 {
+        if value.bitsize(true) <= 257 {
             self.push_raw(value)
         } else if quiet {
             self.push_nan()
@@ -861,15 +859,15 @@ impl StackValue for BigInt {
         builder: &mut CellBuilder,
         _: &dyn CellContext,
     ) -> Result<(), Error> {
-        let bitsize = bitsize(self, true);
+        let bitsize = self.bitsize(true);
         if bitsize <= 64 {
             // vm_stk_tinyint#01 value:int64 = VmStackValue;
             ok!(builder.store_u8(0x01));
-            store_int_to_builder(self, 64, true, builder)
+            builder.store_bigint(self, 64, true)
         } else {
             // vm_stk_int#0201_ value:int257 = VmStackValue;
             ok!(builder.store_uint(0x0200 >> 1, 15));
-            store_int_to_builder(self, 257, true, builder)
+            builder.store_bigint(self, 257, true)
         }
     }
 

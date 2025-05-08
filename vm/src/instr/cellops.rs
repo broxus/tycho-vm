@@ -1,9 +1,8 @@
 use std::borrow::Cow;
 
-use everscale_types::cell::{
-    Cell, CellBuilder, CellContext, CellFamily, CellSlice, DynCell, HashBytes, LoadMode,
-};
+use everscale_types::cell::LoadMode;
 use everscale_types::error::Error;
+use everscale_types::prelude::*;
 use num_bigint::{BigInt, Sign};
 use num_traits::ToPrimitive;
 use tycho_vm_proc::vm_module;
@@ -19,7 +18,7 @@ use crate::stack::{Stack, StackValue};
 use crate::state::VmState;
 #[cfg(any(feature = "dump", feature = "tracing"))]
 use crate::util::CellSliceExt;
-use crate::util::{bitsize, load_int_from_slice, remove_trailing, OwnedCellSlice};
+use crate::util::{remove_trailing, OwnedCellSlice};
 
 pub struct CellOps;
 
@@ -1642,7 +1641,7 @@ fn exec_store_int_common(stack: &mut Stack, bits: u16, args: StoreIntArgs) -> Vm
         };
     }
 
-    let int_bits = bitsize(&x, args.is_signed());
+    let int_bits = x.bitsize(args.is_signed());
     if bits < int_bits {
         return if args.is_quiet() {
             finish_store_fail(stack, builder, x, 1, args)
@@ -1832,7 +1831,7 @@ fn exec_load_int_common(stack: &mut Stack, bits: u16, args: LoadIntArgs) -> VmRe
 
     let range = {
         let mut slice = cs.apply();
-        let int = load_int_from_slice(&mut slice, bits, args.is_signed())?;
+        let int = slice.load_bigint(bits, args.is_signed())?;
 
         ok!(stack.push_int(int));
 
@@ -2081,7 +2080,6 @@ mod tests {
     use tracing_test::traced_test;
 
     use super::*;
-    use crate::util::store_int_to_builder;
 
     #[test]
     #[traced_test]
@@ -2802,7 +2800,7 @@ mod tests {
 
     fn make_cell_slice_with_refs(value: u128, bits: u16, refs_count: u8) -> OwnedCellSlice {
         let mut cb = CellBuilder::new();
-        store_int_to_builder(&BigInt::from(value), bits, false, &mut cb).unwrap();
+        cb.store_bigint(&BigInt::from(value), bits, false).unwrap();
 
         for _ in 0..refs_count {
             let mut rb = CellBuilder::new();
@@ -2816,14 +2814,14 @@ mod tests {
 
     fn make_uint_cell_slice(value: u128, bits: u16) -> OwnedCellSlice {
         let mut cb = CellBuilder::new();
-        store_int_to_builder(&BigInt::from(value), bits, false, &mut cb).unwrap();
+        cb.store_bigint(&BigInt::from(value), bits, false).unwrap();
         let cell = cb.build().unwrap();
         OwnedCellSlice::new_allow_exotic(cell)
     }
 
     fn make_int_cell_slice(value: i128, bits: u16) -> OwnedCellSlice {
         let mut cb = CellBuilder::new();
-        store_int_to_builder(&BigInt::from(value), bits, true, &mut cb).unwrap();
+        cb.store_bigint(&BigInt::from(value), bits, true).unwrap();
         let cell = cb.build().unwrap();
         OwnedCellSlice::new_allow_exotic(cell)
     }
@@ -2857,7 +2855,7 @@ mod tests {
 
     fn cut_slice_to_uint(slice: &OwnedCellSlice, bits: u16) -> (BigInt, OwnedCellSlice) {
         let mut cs = slice.apply();
-        let prefix = load_int_from_slice(&mut cs, bits, false).unwrap();
+        let prefix = cs.load_bigint(bits, false).unwrap();
 
         let mut right = slice.clone();
         right.set_range(cs.range());
@@ -2866,7 +2864,7 @@ mod tests {
 
     fn cut_slice_to_int(slice: &OwnedCellSlice, bits: u16) -> (BigInt, OwnedCellSlice) {
         let mut cs = slice.apply();
-        let prefix = load_int_from_slice(&mut cs, bits, true).unwrap();
+        let prefix = cs.load_bigint(bits, true).unwrap();
 
         let mut right = slice.clone();
         right.set_range(cs.range());

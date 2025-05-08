@@ -14,7 +14,7 @@ use crate::saferc::SafeRc;
 use crate::smc_info::{SmcInfoBase, SmcInfoTonV4, SmcInfoTonV6};
 use crate::stack::{RcStackValue, Stack, TupleExt};
 use crate::state::VmState;
-use crate::util::{load_varint, shift_ceil_price, store_int_to_builder, OwnedCellSlice};
+use crate::util::{shift_ceil_price, OwnedCellSlice};
 
 pub struct ConfigOps;
 
@@ -52,8 +52,8 @@ impl ConfigOps {
         ));
         let dict = ok!(stack.pop_cell_opt());
 
-        let mut builder = CellBuilder::new();
-        store_int_to_builder(&idx, CONFIG_KEY_BITS, true, &mut builder)?;
+        let mut builder = CellDataBuilder::new();
+        builder.store_bigint(&idx, CONFIG_KEY_BITS, true)?;
         let key = builder.as_data_slice();
 
         let value = dict::dict_get(dict.as_deref(), CONFIG_KEY_BITS, key, &st.gas)?;
@@ -289,7 +289,7 @@ impl ConfigOps {
 
         let value_opt = balance.get_ext(key_builder.as_data_slice(), gas_context)?;
         if let Some(mut value) = value_opt {
-            let result = load_varint(&mut value, 5, false)?;
+            let result = value.load_var_bigint(5, false)?;
             ok!(stack.push_int(result));
         } else {
             ok!(stack.push_zero());

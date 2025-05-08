@@ -48,6 +48,7 @@ tracing-test = { workspace = true }
 everscale-types = { workspace = true, default-features = false, features = [
     "models",
     "base64",
+    "bigint",
     "rand",
 ] }
 everscale-asm-macros = { workspace = true }

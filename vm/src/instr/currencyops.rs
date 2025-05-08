@@ -11,9 +11,7 @@ use crate::saferc::SafeRc;
 use crate::smc_info::VmVersion;
 use crate::stack::{RcStackValue, Stack, StackValue, Tuple};
 use crate::state::VmState;
-use crate::util::{
-    bitsize, load_uint_leq, load_varint, store_int_to_builder_unchecked, OwnedCellSlice,
-};
+use crate::util::{load_uint_leq, OwnedCellSlice};
 
 pub struct CurrencyOps;
 
@@ -30,7 +28,7 @@ impl CurrencyOps {
         let int;
         let cs_range = {
             let mut cs = csr.apply();
-            int = load_varint(&mut cs, len_bits, signed)?;
+            int = cs.load_var_bigint(len_bits, signed)?;
             cs.range()
         };
         SafeRc::make_mut(&mut csr).set_range(cs_range);
@@ -48,9 +46,7 @@ impl CurrencyOps {
         let stack = SafeRc::make_mut(&mut st.stack);
         let int = ok!(stack.pop_int());
         let mut builder = ok!(stack.pop_builder());
-
-        store_varint(&int, len_bits, signed, SafeRc::make_mut(&mut builder))?;
-
+        SafeRc::make_mut(&mut builder).store_var_bigint(&int, len_bits, signed)?;
         ok!(stack.push_raw(builder));
         Ok(0)
     }
@@ -395,24 +391,6 @@ fn skip_maybe_anycast(cs: &mut CellSlice, version: &VmVersion) -> Result<(), Err
     Ok(())
 }
 
-fn store_varint(
-    int: &BigInt,
-    len_bits: u16,
-    signed: bool,
-    builder: &mut CellBuilder,
-) -> VmResult<()> {
-    let bitsize = bitsize(int, signed);
-    let bytes = bitsize.div_ceil(8);
-    vm_ensure!(bytes < (1 << len_bits), IntegerOutOfRange {
-        min: 0,
-        max: (1 << len_bits) - 1,
-        actual: bytes.to_string(),
-    });
-    builder.store_small_uint(bytes as u8, len_bits)?;
-    store_int_to_builder_unchecked(int, bytes * 8, signed, builder)?;
-    Ok(())
-}
-
 #[cfg(test)]
 mod test {
     use everscale_types::models::{Anycast, StdAddr};
@@ -425,7 +403,7 @@ mod test {
     fn load_varint_u16_test() -> anyhow::Result<()> {
         let int = BigInt::from(5);
         let mut builder = CellBuilder::new();
-        store_varint(&int, 4, true, &mut builder)?;
+        builder.store_var_bigint(&int, 4, true)?;
         let mut slice = OwnedCellSlice::new_allow_exotic(builder.build()?);
         let value = SafeRc::new_dyn_value(slice.clone());
 
@@ -444,7 +422,7 @@ mod test {
     fn load_varint_u32_test() -> anyhow::Result<()> {
         let int = BigInt::from(5);
         let mut builder = CellBuilder::new();
-        store_varint(&int, 5, true, &mut builder)?;
+        builder.store_var_bigint(&int, 5, true)?;
         let mut slice = OwnedCellSlice::new_allow_exotic(builder.build()?);
         let value = SafeRc::new_dyn_value(slice.clone());
 
