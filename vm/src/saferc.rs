@@ -11,6 +11,13 @@ pub trait SafeDelete: 'static {
     fn rc_into_safe_delete(self: Rc<Self>) -> Rc<dyn SafeDelete>;
 }
 
+impl<T: 'static> SafeDelete for T {
+    #[inline]
+    fn rc_into_safe_delete(self: Rc<Self>) -> Rc<dyn SafeDelete> {
+        self
+    }
+}
+
 /// [`Rc`]-like object with a linear drop.
 ///
 /// Allows to build a deeply

@@ -454,13 +454,6 @@ impl Stack {
     }
 }
 
-impl SafeDelete for Stack {
-    #[inline]
-    fn rc_into_safe_delete(self: Rc<Self>) -> Rc<dyn SafeDelete> {
-        self
-    }
-}
-
 impl SafeRcMakeMut for Stack {
     #[inline]
     fn rc_make_mut(rc: &mut Rc<Self>) -> &mut Self {
@@ -1435,21 +1428,6 @@ impl<T: StackValue + 'static> From<Rc<T>> for RcStackValue {
     fn from(value: Rc<T>) -> Self {
         Self(ManuallyDrop::new(value))
     }
-}
-
-macro_rules! impl_safe_delete {
-    ($($ty:ty),*$(,)?) => {
-        $(impl SafeDelete for $ty {
-            #[inline]
-            fn rc_into_safe_delete(self: Rc<Self>) -> Rc<dyn SafeDelete> {
-                self
-            }
-        })*
-    };
-}
-
-impl_safe_delete! {
-    (), NaN, BigInt, Cell, OwnedCellSlice, CellBuilder, Tuple
 }
 
 #[cfg(test)]

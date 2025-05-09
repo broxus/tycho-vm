@@ -485,13 +485,6 @@ impl Cont for QuitCont {
     }
 }
 
-impl SafeDelete for QuitCont {
-    #[inline]
-    fn rc_into_safe_delete(self: Rc<Self>) -> Rc<dyn SafeDelete> {
-        self
-    }
-}
-
 impl Store for QuitCont {
     fn store_into(&self, builder: &mut CellBuilder, _: &dyn CellContext) -> Result<(), Error> {
         ok!(builder.store_small_uint(Self::TAG, 4));
@@ -545,13 +538,6 @@ impl Cont for ExcQuitCont {
         vm_log_trace!("terminating vm in the default exception handler: n={n}");
         *exit_code = !(n as i32);
         Ok(None)
-    }
-}
-
-impl SafeDelete for ExcQuitCont {
-    #[inline]
-    fn rc_into_safe_delete(self: Rc<Self>) -> Rc<dyn SafeDelete> {
-        self
     }
 }
 
@@ -613,13 +599,6 @@ impl Cont for PushIntCont {
             Ok(this) => this.next,
             Err(this) => this.next.clone(),
         }))
-    }
-}
-
-impl SafeDelete for PushIntCont {
-    #[inline]
-    fn rc_into_safe_delete(self: Rc<Self>) -> Rc<dyn SafeDelete> {
-        self
     }
 }
 
@@ -711,13 +690,6 @@ impl Cont for RepeatCont {
     }
 }
 
-impl SafeDelete for RepeatCont {
-    #[inline]
-    fn rc_into_safe_delete(self: Rc<Self>) -> Rc<dyn SafeDelete> {
-        self
-    }
-}
-
 impl Store for RepeatCont {
     fn store_into(
         &self,
@@ -788,13 +760,6 @@ impl Cont for AgainCont {
     }
 }
 
-impl SafeDelete for AgainCont {
-    #[inline]
-    fn rc_into_safe_delete(self: Rc<Self>) -> Rc<dyn SafeDelete> {
-        self
-    }
-}
-
 impl Store for AgainCont {
     fn store_into(
         &self,
@@ -859,13 +824,6 @@ impl Cont for UntilCont {
             state.set_c0(RcCont::from(self.clone()));
         }
         Ok(Some(self.body.clone()))
-    }
-}
-
-impl SafeDelete for UntilCont {
-    #[inline]
-    fn rc_into_safe_delete(self: Rc<Self>) -> Rc<dyn SafeDelete> {
-        self
     }
 }
 
@@ -967,13 +925,6 @@ impl Cont for WhileCont {
     }
 }
 
-impl SafeDelete for WhileCont {
-    #[inline]
-    fn rc_into_safe_delete(self: Rc<Self>) -> Rc<dyn SafeDelete> {
-        self
-    }
-}
-
 impl Store for WhileCont {
     fn store_into(
         &self,
@@ -1051,13 +1002,6 @@ impl Cont for ArgContExt {
 
     fn get_control_data_mut(&mut self) -> Option<&mut ControlData> {
         Some(&mut self.data)
-    }
-}
-
-impl SafeDelete for ArgContExt {
-    #[inline]
-    fn rc_into_safe_delete(self: Rc<Self>) -> Rc<dyn SafeDelete> {
-        self
     }
 }
 
@@ -1140,13 +1084,6 @@ impl Cont for OrdCont {
 
     fn get_control_data_mut(&mut self) -> Option<&mut ControlData> {
         Some(&mut self.data)
-    }
-}
-
-impl SafeDelete for OrdCont {
-    #[inline]
-    fn rc_into_safe_delete(self: Rc<Self>) -> Rc<dyn SafeDelete> {
-        self
     }
 }
 
