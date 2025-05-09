@@ -783,13 +783,6 @@ impl StackValue for () {
     }
 }
 
-impl SafeRcMakeMut for () {
-    #[inline]
-    fn rc_make_mut(rc: &mut Rc<Self>) -> &mut Self {
-        Rc::make_mut(rc)
-    }
-}
-
 // === Int (NaN) ===
 
 /// Invalid integer stack value.
@@ -1300,13 +1293,6 @@ impl StaticStackValue for Tuple {
                 actual: value.ty(),
             }),
         }
-    }
-}
-
-impl SafeRcMakeMut for Tuple {
-    #[inline]
-    fn rc_make_mut(rc: &mut Rc<Self>) -> &mut Self {
-        Rc::make_mut(rc)
     }
 }
 

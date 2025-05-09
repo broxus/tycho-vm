@@ -1,5 +1,6 @@
 use std::mem::ManuallyDrop;
 use std::rc::Rc;
+use std::sync::Arc;
 
 use everscale_types::error::Error;
 use everscale_types::prelude::*;
@@ -59,6 +60,11 @@ impl<T: SafeDelete + ?Sized> SafeRc<T> {
     #[inline]
     pub fn ptr_eq(lhs: &Self, rhs: &Self) -> bool {
         Rc::<T>::ptr_eq(&*lhs.0, &*rhs.0)
+    }
+
+    #[inline]
+    pub fn as_ptr(&self) -> *const T {
+        Rc::as_ptr(&*self.0)
     }
 }
 
@@ -209,6 +215,48 @@ impl<T: SafeRcMakeMut + ?Sized> SafeRc<T> {
     #[inline]
     pub fn make_mut(&mut self) -> &mut T {
         T::rc_make_mut(&mut *self.0)
+    }
+}
+
+impl SafeRcMakeMut for () {
+    #[inline]
+    fn rc_make_mut(rc: &mut Rc<Self>) -> &mut Self {
+        Rc::make_mut(rc)
+    }
+}
+
+impl<T: Clone + 'static> SafeRcMakeMut for Box<T> {
+    #[inline]
+    fn rc_make_mut(rc: &mut Rc<Self>) -> &mut Self {
+        Rc::make_mut(rc)
+    }
+}
+
+impl<T: ?Sized + 'static> SafeRcMakeMut for Rc<T> {
+    #[inline]
+    fn rc_make_mut(rc: &mut Rc<Self>) -> &mut Self {
+        Rc::make_mut(rc)
+    }
+}
+
+impl<T: ?Sized + 'static> SafeRcMakeMut for Arc<T> {
+    #[inline]
+    fn rc_make_mut(rc: &mut Rc<Self>) -> &mut Self {
+        Rc::make_mut(rc)
+    }
+}
+
+impl<T: Clone + 'static> SafeRcMakeMut for Vec<T> {
+    #[inline]
+    fn rc_make_mut(rc: &mut Rc<Self>) -> &mut Self {
+        Rc::make_mut(rc)
+    }
+}
+
+impl SafeRcMakeMut for String {
+    #[inline]
+    fn rc_make_mut(rc: &mut Rc<Self>) -> &mut Self {
+        Rc::make_mut(rc)
     }
 }
 
