@@ -97,7 +97,7 @@ impl ExecutorState<'_> {
         let init = if slice.load_bit()? {
             Some(if slice.load_bit()? {
                 // State init as reference.
-                let state_root = slice.load_reference()?;
+                let state_root = slice.load_reference_cloned()?;
                 anyhow::ensure!(
                     !state_root.is_exotic(),
                     "state init must be an ordinary cell"
@@ -108,7 +108,7 @@ impl ExecutorState<'_> {
                 anyhow::ensure!(slice.is_empty(), "state init contains extra data");
 
                 MsgStateInit {
-                    hash: *state_root.repr_hash(),
+                    root: state_root,
                     parsed,
                 }
             } else {
@@ -122,7 +122,7 @@ impl ExecutorState<'_> {
                 let state_root = CellBuilder::build_from(state_init_cs)?;
 
                 MsgStateInit {
-                    hash: *state_root.repr_hash(),
+                    root: state_root,
                     parsed,
                 }
             })
@@ -194,10 +194,16 @@ pub struct ReceivedMessage {
 /// Message state init.
 #[derive(Debug, Clone)]
 pub struct MsgStateInit {
-    /// [`StateInit`] hash.
-    pub hash: HashBytes,
+    /// Serialized [`StateInit`].
+    pub root: Cell,
     /// Parsed [`StateInit`].
     pub parsed: StateInit,
+}
+
+impl MsgStateInit {
+    pub fn root_hash(&self) -> &HashBytes {
+        self.root.repr_hash()
+    }
 }
 
 #[cfg(test)]
@@ -245,7 +251,7 @@ mod tests {
             let target = StateInit::default();
             assert_eq!(init.parsed, target);
             let target_hash = *CellBuilder::build_from(&target).unwrap().repr_hash();
-            assert_eq!(init.hash, target_hash);
+            assert_eq!(init.root_hash(), &target_hash);
         }
         assert!(msg.body.0.is_empty());
         assert_eq!(msg.balance_remaining, CurrencyCollection::ZERO);

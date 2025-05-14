@@ -2,10 +2,8 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use everscale_types::error::Error;
-use everscale_types::error::Error::InvalidData;
 use everscale_types::models::{
-    BlockchainConfigParams, CurrencyCollection, ExtInMsgInfo, IntAddr, IntMsgInfo, MsgInfo,
-    OwnedMessage,
+    BlockchainConfigParams, CurrencyCollection, IntAddr, IntMsgInfo, MsgType, StateInit,
 };
 use everscale_types::num::Tokens;
 use everscale_types::prelude::*;
@@ -435,8 +433,11 @@ impl SmcInfoTonV6 {
         self
     }
 
-    pub fn require_ton_v9(self) -> SmcInfoTonV9 {
-        SmcInfoTonV9 { base: self }
+    pub fn require_ton_v11(self) -> SmcInfoTonV11 {
+        SmcInfoTonV11 {
+            base: self,
+            in_msg: None,
+        }
     }
 
     fn write_items(&self, items: &mut Tuple) {
@@ -468,188 +469,88 @@ impl SmcInfo for SmcInfoTonV6 {
     }
 }
 
-/// Extended smart contract info for TVM since version 9.
-#[derive(Default, Debug, Clone)]
-#[repr(transparent)]
-pub struct SmcInfoTonV9 {
-    /// Base values.
-    pub base: SmcInfoTonV6,
-}
-
-impl SmcInfoTonV9 {
-    const C7_ITEM_COUNT: usize = SmcInfoTonV6::C7_ITEM_COUNT;
-
-    #[inline]
-    fn write_items(&self, items: &mut Tuple) {
-        // ..base:SmcInfoTonV6
-        self.base.write_items(items);
-    }
-
-    pub fn require_ton_v11(self) -> SmcInfoTonV11 {
-        SmcInfoTonV11 {
-            base: self,
-            in_msg: None,
-        }
-    }
-}
-
-impl SmcInfo for SmcInfoTonV9 {
-    fn version(&self) -> VmVersion {
-        VmVersion::Ton(9)
-    }
-
-    fn build_c7(&self) -> SafeRc<Tuple> {
-        let mut t1 = Vec::with_capacity(Self::C7_ITEM_COUNT);
-        self.write_items(&mut t1);
-        SafeRc::new(vec![SafeRc::new_dyn_value(t1)])
-    }
-}
-
 #[derive(Default, Debug, Clone)]
 pub struct SmcInfoTonV11 {
-    pub base: SmcInfoTonV9,
+    pub base: SmcInfoTonV6,
     pub in_msg: Option<SafeRc<Tuple>>,
 }
 
 impl SmcInfoTonV11 {
     pub const IN_MSG_PARAMS_IDX: usize = 17;
-    const C7_ITEM_COUNT: usize = SmcInfoTonV9::C7_ITEM_COUNT + 1;
-    #[inline]
-    fn write_items(&self, items: &mut Tuple) {
-        // ..base:SmcInfoTonV9
-        self.base.write_items(items);
-        let message_value = match &self.in_msg {
-            Some(message) => message.clone().into_dyn_value(),
-            None => Self::prepare_empty_msg_tuple().into_dyn_value(),
-        };
 
-        items.push(message_value);
-    }
+    const C7_ITEM_COUNT: usize = SmcInfoTonV6::C7_ITEM_COUNT + 1;
 
-    pub fn with_in_message(mut self, msg_cell_opt: Option<&Cell>) -> Result<Self, Error> {
-        let Some(msg) = msg_cell_opt else {
-            return Ok(self);
-        };
+    pub fn unpack_in_msg_partial(
+        msg_root: Cell,
+        remaining_value: Option<CurrencyCollection>,
+    ) -> Result<Option<UnpackedInMsgSmcInfo>, Error> {
+        fn src_addr_slice_range(mut cs: CellSlice<'_>) -> Result<CellSliceRange, Error> {
+            // Skip flags.
+            cs.skip_first(3, 0)?;
 
-        let message = OwnedMessage::load_from(&mut msg.as_slice()?)?;
+            // Read `src`.
+            let mut addr_slice = cs;
+            IntAddr::load_from(&mut cs)?;
 
-        if message.info.is_external_out() {
-            return Err(InvalidData);
+            // Leave only a `src` range in the `addr_slice`.
+            addr_slice.skip_last(cs.size_bits(), cs.size_refs())?;
+
+            Ok(addr_slice.range())
         }
 
-        let state_init_opt = match message.init {
-            Some(init) => Some(CellBuilder::build_from(init)?),
-            None => None,
-        };
-
-        let balance = self.base.base.base.message_balance.clone();
-        let params_tuple = match message.info {
-            MsgInfo::Int(info) => {
-                Self::prepare_internal_in_msg_tuple(info, state_init_opt, balance)?
+        let mut cs = msg_root.as_slice()?;
+        let src_addr_slice;
+        let info = match MsgType::load_from(&mut cs)? {
+            MsgType::Int => {
+                src_addr_slice = src_addr_slice_range(cs)?;
+                IntMsgInfo::load_from(&mut cs)?
             }
-            MsgInfo::ExtIn(info) => {
-                Self::prepare_external_in_msg_tuple(info, state_init_opt, balance)?
+            MsgType::ExtIn | MsgType::ExtOut => return Ok(None),
+        };
+
+        let state_init = if cs.load_bit()? {
+            Some(if cs.load_bit()? {
+                cs.load_reference_cloned()?
+            } else {
+                let mut state_init_cs = cs;
+                StateInit::load_from(&mut cs)?;
+                state_init_cs.skip_last(cs.size_bits(), cs.size_refs())?;
+                CellBuilder::build_from(state_init_cs)?
+            })
+        } else {
+            None
+        };
+
+        Ok(Some(UnpackedInMsgSmcInfo {
+            bounce: info.bounce,
+            bounced: info.bounced,
+            src_addr: (src_addr_slice, msg_root).into(),
+            fwd_fee: info.fwd_fee,
+            created_lt: info.created_lt,
+            created_at: info.created_at,
+            original_value: info.value.tokens,
+            remaining_value: remaining_value.unwrap_or(info.value),
+            state_init,
+        }))
+    }
+
+    pub fn with_unpacked_in_msg(mut self, in_msg: Option<SafeRc<Tuple>>) -> Self {
+        self.in_msg = in_msg;
+        self
+    }
+
+    #[inline]
+    fn write_items(&self, items: &mut Tuple) {
+        // ..base:SmcInfoTonV6
+        self.base.write_items(items);
+        // in_msg_params:[...]
+        items.push(
+            match &self.in_msg {
+                Some(message) => message.clone(),
+                None => UnpackedInMsgSmcInfo::empty_msg_tuple(),
             }
-            _ => unreachable!(),
-        };
-
-        self.in_msg = Some(params_tuple);
-        Ok(self)
-    }
-
-    fn prepare_internal_in_msg_tuple(
-        msg: IntMsgInfo,
-        state_init: Option<Cell>,
-        msg_balance_remaining: CurrencyCollection,
-    ) -> Result<SafeRc<Tuple>, Error> {
-        let address = OwnedCellSlice::new_allow_exotic(CellBuilder::build_from(msg.src)?);
-        let extra_currency = if msg_balance_remaining.other.is_empty() {
-            Stack::make_null()
-        } else {
-            SafeRc::new_dyn_value(CellBuilder::build_from(msg_balance_remaining.other)?)
-        };
-
-        let state_init = match state_init {
-            Some(state_init) => SafeRc::new_dyn_value(state_init),
-            None => Stack::make_null(),
-        };
-
-        let tuple = tuple![
-            int if msg.bounce { -1 } else { 0 },
-            int if msg.bounced { -1 } else { 0 },
-            slice address,
-            int msg.fwd_fee.into_inner(),
-            int msg.created_lt,
-            int msg.created_at,
-            int msg.value.tokens.into_inner(),
-            int msg_balance_remaining.tokens.into_inner(),
-            raw extra_currency,
-            raw state_init
-        ];
-
-        Ok(SafeRc::new(tuple))
-    }
-
-    fn prepare_external_in_msg_tuple(
-        msg: ExtInMsgInfo,
-        state_init: Option<Cell>,
-        msg_balance_remaining: CurrencyCollection,
-    ) -> Result<SafeRc<Tuple>, Error> {
-        let src_address = Self::make_none_addr_slice();
-        let extra_currency = if msg_balance_remaining.other.is_empty() {
-            Stack::make_null()
-        } else {
-            SafeRc::new_dyn_value(CellBuilder::build_from(msg_balance_remaining.other)?)
-        };
-
-        let state_init = match state_init {
-            Some(state_init) => SafeRc::new_dyn_value(state_init),
-            None => Stack::make_null(),
-        };
-
-        let tuple = tuple![
-            int 0,
-            int 0,
-            slice src_address,
-            int msg.import_fee.into_inner(),
-            int 0,
-            int 0,
-            int 0,
-            int msg_balance_remaining.tokens.into_inner(),
-            raw extra_currency,
-            raw state_init
-        ];
-
-        Ok(SafeRc::new(tuple))
-    }
-
-    fn prepare_empty_msg_tuple() -> SafeRc<Tuple> {
-        let src_address = Self::make_none_addr_slice();
-
-        let tuple = tuple![
-            int 0, //bounce
-            int 0, //bounced
-            slice src_address, //src_addr
-            int 0, //fwd fee
-            int 0, //created lt
-            int 0, //created at,
-            int 0, //original value,
-            int 0, // value,
-            null,  //extra currency
-            null   //state init
-        ];
-
-        SafeRc::new(tuple)
-    }
-
-    fn make_none_addr_slice() -> OwnedCellSlice {
-        let mut addr_builder = CellBuilder::new();
-        addr_builder.store_zeros(2).expect("can't fail");
-        OwnedCellSlice::new_allow_exotic(
-            addr_builder
-                .build()
-                .expect("2 bits are valid input for empty builder"),
-        )
+            .into_dyn_value(),
+        );
     }
 }
 
@@ -724,6 +625,93 @@ impl IntoSliceUnchecked for CellSliceParts {
     fn into_slice_unchecked(self) -> OwnedCellSlice {
         OwnedCellSlice::from(self)
     }
+}
+
+/// Internal message parts.
+pub struct UnpackedInMsgSmcInfo {
+    pub bounce: bool,
+    pub bounced: bool,
+    pub src_addr: OwnedCellSlice,
+    pub fwd_fee: Tokens,
+    pub created_lt: u64,
+    pub created_at: u32,
+    pub original_value: Tokens,
+    pub remaining_value: CurrencyCollection,
+    pub state_init: Option<Cell>,
+}
+
+impl Default for UnpackedInMsgSmcInfo {
+    fn default() -> Self {
+        Self {
+            bounce: false,
+            bounced: false,
+            src_addr: addr_none_slice(),
+            fwd_fee: Tokens::ZERO,
+            created_lt: 0,
+            created_at: 0,
+            original_value: Tokens::ZERO,
+            remaining_value: CurrencyCollection::ZERO,
+            state_init: None,
+        }
+    }
+}
+
+impl UnpackedInMsgSmcInfo {
+    pub fn empty_msg_tuple() -> SafeRc<Tuple> {
+        thread_local! {
+            static TUPLE: SafeRc<Tuple> = {
+                SafeRc::new(tuple![
+                    int 0, // bounce
+                    int 0, // bounced
+                    raw UnpackedInMsgSmcInfo::addr_none_slice(),
+                    int 0, // fwd fee
+                    int 0, // created_lt
+                    int 0, // created_at
+                    int 0, // original value
+                    int 0, // value
+                    null,  // value extra
+                    null,  // state_init
+                ])
+            }
+        }
+
+        TUPLE.with(Clone::clone)
+    }
+
+    pub fn into_tuple(self) -> SafeRc<Tuple> {
+        SafeRc::new(tuple![
+            raw Stack::make_bool(self.bounce),
+            raw Stack::make_bool(self.bounced),
+            slice self.src_addr,
+            int self.fwd_fee,
+            int self.created_lt,
+            int self.created_at,
+            int self.original_value,
+            int self.remaining_value.tokens,
+            raw match self.remaining_value.other.into_dict().into_root() {
+                Some(root) => SafeRc::new_dyn_value(root),
+                None => Stack::make_null(),
+            },
+            raw match self.state_init {
+                Some(root) => SafeRc::new_dyn_value(root),
+                None => Stack::make_null(),
+            },
+        ])
+    }
+
+    pub fn addr_none_slice() -> RcStackValue {
+        thread_local! {
+            static ADDR_NONE: RcStackValue = SafeRc::new_dyn_value(addr_none_slice());
+        }
+
+        ADDR_NONE.with(SafeRc::clone)
+    }
+}
+
+fn addr_none_slice() -> OwnedCellSlice {
+    let mut addr_none = CellBuilder::new();
+    addr_none.store_zeros(2).unwrap();
+    OwnedCellSlice::from(CellSliceParts::from(addr_none.build().unwrap()))
 }
 
 /// Custom-built Smart Contract Info.
