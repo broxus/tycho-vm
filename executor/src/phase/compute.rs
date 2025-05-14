@@ -1,12 +1,12 @@
 use anyhow::Result;
 use everscale_types::models::{
     AccountState, AccountStatus, ComputePhase, ComputePhaseSkipReason, CurrencyCollection,
-    ExecutedComputePhase, SkippedComputePhase, StateInit, TickTock,
+    ExecutedComputePhase, IntAddr, IntMsgInfo, MsgType, SkippedComputePhase, StateInit, TickTock,
 };
 use everscale_types::num::Tokens;
 use everscale_types::prelude::*;
 use num_bigint::{BigInt, Sign};
-use tycho_vm::{tuple, SafeRc, SmcInfoBase, Stack, VmState};
+use tycho_vm::{tuple, SafeRc, SmcInfoBase, Stack, Tuple, UnpackedInMsgSmcInfo, VmState};
 
 use crate::phase::receive::{MsgStateInit, ReceivedMessage};
 use crate::util::{
@@ -147,6 +147,7 @@ impl ExecutorState<'_> {
             });
             return Ok(res);
         }
+
         // Apply internal message state.
         let state_libs;
         let msg_libs;
@@ -180,7 +181,7 @@ impl ExecutorState<'_> {
                     &self.address.address
                 };
 
-                if from_msg.hash != *target_hash || from_msg.parsed.split_depth.is_some() {
+                if from_msg.root_hash() != target_hash || from_msg.parsed.split_depth.is_some() {
                     // State hash mismatch, cannot use this state.
                     // We also forbid using `split_depth` (for now).
                     res.compute_phase = ComputePhase::Skipped(SkippedComputePhase {
@@ -227,7 +228,7 @@ impl ExecutorState<'_> {
             }
             (Some(from_msg), AccountState::Active(StateInit { libraries, .. })) => {
                 // Check if a state from the external message has the correct hash.
-                if is_external && from_msg.hash != self.address.address {
+                if is_external && from_msg.root_hash() != &self.address.address {
                     res.compute_phase = ComputePhase::Skipped(SkippedComputePhase {
                         reason: ComputePhaseSkipReason::BadState,
                     });
@@ -242,6 +243,12 @@ impl ExecutorState<'_> {
                 msg_libs = Some(from_msg.parsed.libraries.clone());
             }
         }
+
+        // Unpack internal message.
+        let unpacked_in_msg = match ctx.input.in_msg() {
+            Some(msg) => msg.make_tuple()?,
+            None => None,
+        };
 
         // Build VM stack and register info.
         let stack = self.prepare_vm_stack(ctx.input);
@@ -262,9 +269,8 @@ impl ExecutorState<'_> {
             .with_storage_fees(ctx.storage_fee)
             .require_ton_v6()
             .with_unpacked_config(self.config.unpacked.as_tuple())
-            .require_ton_v9()
             .require_ton_v11()
-            .with_in_message(ctx.input.in_msg().map(|x| &x.root))?;
+            .with_unpacked_in_msg(unpacked_in_msg);
 
         let libraries = (msg_libs, state_libs, &self.params.libraries);
         let mut vm = VmState::builder()
@@ -364,8 +370,8 @@ impl ExecutorState<'_> {
         SafeRc::new(Stack::with_items(match input {
             TransactionInput::Ordinary(msg) => {
                 tuple![
-                    int self.balance.tokens.into_inner(),
-                    int msg.balance_remaining.tokens.into_inner(),
+                    int self.balance.tokens,
+                    int msg.balance_remaining.tokens,
                     cell msg.root.clone(),
                     slice msg.body.clone(),
                     int if msg.is_external { -1 } else { 0 },
@@ -373,7 +379,7 @@ impl ExecutorState<'_> {
             }
             TransactionInput::TickTock(ty) => {
                 tuple![
-                    int self.balance.tokens.into_inner(),
+                    int self.balance.tokens,
                     int BigInt::from_bytes_be(Sign::Plus, self.address.address.as_array()),
                     int match ty {
                         TickTock::Tick => 0,
@@ -383,6 +389,42 @@ impl ExecutorState<'_> {
                 ]
             }
         }))
+    }
+}
+
+impl ReceivedMessage {
+    fn make_tuple(&self) -> Result<Option<SafeRc<Tuple>>, everscale_types::error::Error> {
+        let mut cs = self.root.as_slice()?;
+        if MsgType::load_from(&mut cs)? != MsgType::Int {
+            return Ok(None);
+        }
+
+        // Get `src` addr range.
+        let src_addr_slice = {
+            let mut cs = cs;
+            // Skip flags.
+            cs.skip_first(3, 0)?;
+            let mut addr_slice = cs;
+            // Read `src`.
+            IntAddr::load_from(&mut cs)?;
+            addr_slice.skip_last(cs.size_bits(), cs.size_refs())?;
+            addr_slice.range()
+        };
+
+        let info = IntMsgInfo::load_from(&mut cs)?;
+
+        let unpacked = UnpackedInMsgSmcInfo {
+            bounce: info.bounce,
+            bounced: info.bounced,
+            src_addr: (src_addr_slice, self.root.clone()).into(),
+            fwd_fee: info.fwd_fee,
+            created_lt: info.created_lt,
+            created_at: info.created_at,
+            original_value: info.value.tokens,
+            remaining_value: self.balance_remaining.clone(),
+            state_init: self.init.as_ref().map(|init| init.root.clone()),
+        };
+        Ok(Some(unpacked.into_tuple()))
     }
 }
 

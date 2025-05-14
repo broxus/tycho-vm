@@ -186,8 +186,8 @@ pub use self::instr::{codepage, codepage0};
 pub use self::log::{VmLogRows, VmLogRowsGuard, VmLogSubscriber, VM_LOG_TARGET};
 pub use self::saferc::{SafeDelete, SafeRc, SafeRcMakeMut};
 pub use self::smc_info::{
-    CustomSmcInfo, SmcInfo, SmcInfoBase, SmcInfoTonV4, SmcInfoTonV6, SmcInfoTonV9, UnpackedConfig,
-    VmVersion,
+    CustomSmcInfo, SmcInfo, SmcInfoBase, SmcInfoTonV11, SmcInfoTonV4, SmcInfoTonV6, UnpackedConfig,
+    UnpackedInMsgSmcInfo, VmVersion,
 };
 pub use self::stack::{
     NaN, RcStackValue, Stack, StackValue, StackValueType, StaticStackValue, Tuple, TupleExt,
