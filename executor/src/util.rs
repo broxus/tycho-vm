@@ -1,4 +1,6 @@
-use std::mem::ManuallyDrop;
+use std::collections::hash_map;
+use std::ptr::NonNull;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 use ahash::HashMap;
 use everscale_types::cell::CellTreeStats;
@@ -33,60 +35,324 @@ impl StorageStatLimits {
     };
 }
 
-pub struct OwnedExtStorageStat {
-    cells: Vec<Cell>,
-    inner: ManuallyDrop<ExtStorageStat<'static>>,
+#[derive(Default)]
+pub struct StorageCache {
+    items: HashMap<HashBytes, StorageCacheItem>,
 }
 
-impl OwnedExtStorageStat {
-    pub fn unlimited() -> Self {
-        Self::with_limits(StorageStatLimits::UNLIMITED)
-    }
-
-    pub fn with_limits(limits: StorageStatLimits) -> Self {
-        Self {
-            cells: Vec::new(),
-            inner: ManuallyDrop::new(ExtStorageStat::with_limits(limits)),
+impl StorageCache {
+    pub(crate) fn with_target_capacity(existing: Option<&StorageCache>) -> Self {
+        match existing {
+            None => Self::default(),
+            Some(existing) => Self {
+                items: HashMap::with_capacity_and_hasher(existing.items.len(), Default::default()),
+            },
         }
     }
 
-    pub fn set_unlimited(&mut self) {
-        self.inner.limits = StorageStatLimits::UNLIMITED;
+    pub fn len(&self) -> usize {
+        self.items.len()
     }
 
-    pub fn stats(&self) -> CellTreeStats {
-        self.inner.stats()
-    }
-
-    pub fn add_cell(&mut self, cell: Cell) -> bool {
-        if self.inner.visited.contains_key(cell.repr_hash()) {
-            return true;
-        }
-
-        // SAFETY: We will store the cell afterwards so the lifetime of its hash
-        //         will outlive the `inner` object.
-        let cell_ref = unsafe { std::mem::transmute::<&DynCell, &'static DynCell>(cell.as_ref()) };
-        let res = self.inner.add_cell(cell_ref);
-        self.cells.push(cell);
-        res
+    pub fn is_empty(&self) -> bool {
+        self.items.is_empty()
     }
 
     pub fn clear(&mut self) {
-        self.inner.visited.clear();
-        self.inner.cells = 0;
-        self.inner.bits = 0;
+        self.items.clear();
+    }
 
-        // NOTE: We can clear the cells vector only after clearing the `visited` map.
-        self.cells.clear();
+    pub(crate) fn into_final(self, existing: Option<&'_ StorageCache>) -> FinalStorageStat<'_> {
+        FinalStorageStat {
+            existing,
+            visited: self,
+        }
     }
 }
 
-impl Drop for OwnedExtStorageStat {
-    fn drop(&mut self) {
-        // We must ensure that `inner` is dropped before `cells`.
-        // SAFETY: This is the only place where `inner` is dropped.
-        unsafe { ManuallyDrop::drop(&mut self.inner) };
+pub(crate) struct FinalStorageStat<'a> {
+    existing: Option<&'a StorageCache>,
+    visited: StorageCache,
+}
+
+impl FinalStorageStat<'_> {
+    pub fn into_storage_cache(self) -> StorageCache {
+        self.visited
     }
+
+    pub fn compute_stats(&self) -> CellTreeStats {
+        let mut result = CellTreeStats {
+            bit_count: 0,
+            cell_count: 0,
+        };
+
+        for item in self.visited.items.values() {
+            result.bit_count = result.bit_count.saturating_add(item.bit_len as u64);
+            result.cell_count = result.cell_count.saturating_add(1);
+        }
+
+        result
+    }
+
+    pub fn add_cell(&mut self, cell: &DynCell) {
+        self.add_cell_impl(cell);
+    }
+
+    fn add_cell_impl(&mut self, cell: &DynCell) -> InsertedItem {
+        let hash = cell.repr_hash();
+        if let Some(item) = self.visited.items.get(hash) {
+            return InsertedItem::AlreadyVisited {
+                merkle_depth: item.merkle_depth,
+            };
+        } else if let Some(existing) = self.existing {
+            if let Some(existing) = existing.items.get(hash).cloned() {
+                self.visit_cached(&existing);
+                return InsertedItem::New(existing);
+            }
+        }
+
+        let merkle_diff = cell.cell_type().is_merkle() as u8;
+        let mut max_merkle_depth = 0;
+        let mut item = Box::new(StorageCacheItemInner {
+            strong: AtomicUsize::new(1),
+            parent_hash: *hash,
+            children: [const { None }; 4],
+        });
+        for (i, cell) in cell.references().enumerate() {
+            let child_merkle_depth;
+            match self.add_cell_impl(cell) {
+                InsertedItem::New(child) => {
+                    child_merkle_depth = child.merkle_depth;
+                    unsafe { *item.children.get_unchecked_mut(i) = Some(child) };
+                }
+                InsertedItem::AlreadyVisited { merkle_depth } => {
+                    child_merkle_depth = merkle_depth;
+                }
+            }
+            max_merkle_depth = std::cmp::max(max_merkle_depth, child_merkle_depth);
+        }
+
+        let item = StorageCacheItem {
+            bit_len: cell.bit_len(),
+            merkle_depth: max_merkle_depth + merkle_diff,
+            // SAFETY: Pointer is never null since we are using an existing allocation.
+            ptr: unsafe { NonNull::new_unchecked(Box::into_raw(item)) },
+        };
+
+        self.visited.items.insert(*hash, item.clone());
+        InsertedItem::New(item)
+    }
+
+    fn visit_cached(&mut self, cached: &StorageCacheItem) {
+        match self.visited.items.entry(*cached.hash()) {
+            hash_map::Entry::Vacant(entry) => {
+                entry.insert(cached.clone());
+            }
+            hash_map::Entry::Occupied(_) => return,
+        }
+
+        for cached in cached.references() {
+            self.visit_cached(cached);
+        }
+    }
+}
+
+pub(crate) struct NewStorageStat<'a> {
+    existing: Option<&'a StorageCache>,
+    visited: StorageCache,
+    limits: StorageStatLimits,
+    cells: u32,
+    bits: u32,
+}
+
+impl<'a> NewStorageStat<'a> {
+    pub fn with_limits(limits: StorageStatLimits, existing: Option<&'a StorageCache>) -> Self {
+        let visited = StorageCache::with_target_capacity(existing);
+        Self {
+            existing,
+            visited,
+            limits,
+            cells: 0,
+            bits: 0,
+        }
+    }
+
+    pub fn into_storage_cache(self) -> StorageCache {
+        self.visited
+    }
+
+    pub fn add_cell(&mut self, cell: &DynCell) -> bool {
+        self.add_cell_impl(cell).is_some()
+    }
+
+    fn add_cell_impl(&mut self, cell: &DynCell) -> Option<InsertedItem> {
+        let hash = cell.repr_hash();
+        if let Some(item) = self.visited.items.get(hash) {
+            return Some(InsertedItem::AlreadyVisited {
+                merkle_depth: item.merkle_depth,
+            });
+        } else if let Some(existing) = self.existing {
+            if let Some(existing) = existing.items.get(hash).cloned() {
+                return if self.visit_cached(&existing) {
+                    Some(InsertedItem::New(existing))
+                } else {
+                    None
+                };
+            }
+        }
+
+        let bit_len = cell.bit_len();
+        if !self.add_cell_stats(bit_len) {
+            return None;
+        }
+
+        let merkle_diff = cell.cell_type().is_merkle() as u8;
+        let mut max_merkle_depth = 0;
+        let mut item = Box::new(StorageCacheItemInner {
+            strong: AtomicUsize::new(1),
+            parent_hash: *hash,
+            children: [const { None }; 4],
+        });
+        for (i, cell) in cell.references().enumerate() {
+            let child_merkle_depth;
+            match self.add_cell_impl(cell)? {
+                InsertedItem::New(child) => {
+                    child_merkle_depth = child.merkle_depth;
+                    unsafe { *item.children.get_unchecked_mut(i) = Some(child) };
+                }
+                InsertedItem::AlreadyVisited { merkle_depth } => {
+                    child_merkle_depth = merkle_depth;
+                }
+            }
+            max_merkle_depth = std::cmp::max(max_merkle_depth, child_merkle_depth);
+            if max_merkle_depth + merkle_diff > ExtStorageStat::MAX_ALLOWED_MERKLE_DEPTH {
+                return None;
+            }
+        }
+
+        let item = StorageCacheItem {
+            bit_len,
+            merkle_depth: max_merkle_depth + merkle_diff,
+            // SAFETY: Pointer is never null since we are using an existing allocation.
+            ptr: unsafe { NonNull::new_unchecked(Box::into_raw(item)) },
+        };
+
+        self.visited.items.insert(*hash, item.clone());
+        Some(InsertedItem::New(item))
+    }
+
+    fn visit_cached(&mut self, cached: &StorageCacheItem) -> bool {
+        match self.visited.items.entry(*cached.hash()) {
+            hash_map::Entry::Vacant(entry) => {
+                entry.insert(cached.clone());
+            }
+            hash_map::Entry::Occupied(_) => return true,
+        }
+
+        if !self.add_cell_stats(cached.bit_len) {
+            return false;
+        }
+
+        for cached in cached.references() {
+            if !self.visit_cached(cached) {
+                return false;
+            }
+        }
+
+        true
+    }
+
+    fn add_cell_stats(&mut self, bit_len: u16) -> bool {
+        self.cells = match self.cells.checked_add(1) {
+            Some(cells) => cells,
+            None => return false,
+        };
+        self.bits = match self.bits.checked_add(bit_len as u32) {
+            Some(bits) => bits,
+            None => return false,
+        };
+        self.cells <= self.limits.cell_count && self.bits <= self.limits.bit_count
+    }
+}
+
+enum InsertedItem {
+    New(StorageCacheItem),
+    AlreadyVisited { merkle_depth: u8 },
+}
+
+pub(crate) struct StorageCacheItem {
+    bit_len: u16,
+    merkle_depth: u8,
+    ptr: NonNull<StorageCacheItemInner>,
+}
+
+impl StorageCacheItem {
+    const MAX_REFCOUNT: usize = isize::MAX as usize;
+
+    pub fn hash(&self) -> &HashBytes {
+        &self.inner().parent_hash
+    }
+
+    pub fn references(&self) -> impl Iterator<Item = &'_ Self> {
+        self.inner().children.iter().flat_map(Option::as_ref)
+    }
+
+    #[inline]
+    fn inner(&self) -> &StorageCacheItemInner {
+        // This unsafety is ok because while this arc is alive we're guaranteed
+        // that the inner pointer is valid. Furthermore, we know that the
+        // `ArcInner` structure itself is `Sync` because the inner data is
+        // `Sync` as well, so we're ok loaning out an immutable pointer to these
+        // contents.
+        unsafe { self.ptr.as_ref() }
+    }
+
+    // Non-inlined part of `drop`. Just invokes the destructor.
+    #[inline(never)]
+    unsafe fn drop_slow(&mut self) {
+        let _ = Box::from_raw(self.ptr.as_ptr());
+    }
+}
+
+impl Clone for StorageCacheItem {
+    #[inline]
+    fn clone(&self) -> Self {
+        let old_size = self.inner().strong.fetch_add(1, Ordering::Relaxed);
+        if old_size > Self::MAX_REFCOUNT {
+            std::process::abort();
+        }
+        Self {
+            bit_len: self.bit_len,
+            merkle_depth: self.merkle_depth,
+            ptr: self.ptr,
+        }
+    }
+}
+
+impl Drop for StorageCacheItem {
+    #[inline]
+    fn drop(&mut self) {
+        // Because `fetch_sub` is already atomic, we do not need to synchronize
+        // with other threads unless we are going to delete the object.
+        if self.inner().strong.fetch_sub(1, Ordering::Release) != 1 {
+            return;
+        }
+
+        self.inner().strong.load(Ordering::Acquire);
+
+        unsafe {
+            self.drop_slow();
+        }
+    }
+}
+
+unsafe impl Send for StorageCacheItem {}
+unsafe impl Sync for StorageCacheItem {}
+
+struct StorageCacheItemInner {
+    strong: AtomicUsize,
+    parent_hash: HashBytes,
+    children: [Option<StorageCacheItem>; 4],
 }
 
 #[derive(Default)]
@@ -273,13 +539,14 @@ pub enum StateLimitsResult {
     Fits,
 }
 
-/// NOTE: `stats_cache` is updated only when `StateLimitsResult::Fits` is returned.
+/// NOTE: `storage_cache` is updated only when `StateLimitsResult::Fits` is returned.
 pub fn check_state_limits_diff(
     old_state: &StateInit,
     new_state: &StateInit,
     limits: &SizeLimitsConfig,
     is_masterchain: bool,
-    stats_cache: &mut Option<OwnedExtStorageStat>,
+    storage_cache: &mut Option<StorageCache>,
+    prev_storage_cache: Option<&StorageCache>,
 ) -> StateLimitsResult {
     /// Returns (code, data, libs)
     fn unpack_state(state: &StateInit) -> (Option<&'_ Cell>, Option<&'_ Cell>, &'_ StateLibs) {
@@ -305,7 +572,8 @@ pub fn check_state_limits_diff(
         new_libs,
         limits,
         check_public_libs,
-        stats_cache,
+        storage_cache,
+        prev_storage_cache,
     )
 }
 
@@ -315,28 +583,32 @@ pub fn check_state_limits(
     libs: &StateLibs,
     limits: &SizeLimitsConfig,
     check_public_libs: bool,
-    stats_cache: &mut Option<OwnedExtStorageStat>,
+    storage_cache: &mut Option<StorageCache>,
+    prev_storage_cache: Option<&StorageCache>,
 ) -> StateLimitsResult {
     // Compute storage stats.
-    let mut stats = OwnedExtStorageStat::with_limits(StorageStatLimits {
-        bit_count: limits.max_acc_state_bits,
-        cell_count: limits.max_acc_state_cells,
-    });
+    let mut stats = NewStorageStat::with_limits(
+        StorageStatLimits {
+            bit_count: limits.max_acc_state_bits,
+            cell_count: limits.max_acc_state_cells,
+        },
+        prev_storage_cache,
+    );
 
     if let Some(code) = code {
-        if !stats.add_cell(code.clone()) {
+        if !stats.add_cell(code.as_ref()) {
             return StateLimitsResult::Exceeds;
         }
     }
 
     if let Some(data) = data {
-        if !stats.add_cell(data.clone()) {
+        if !stats.add_cell(data.as_ref()) {
             return StateLimitsResult::Exceeds;
         }
     }
 
     if let Some(libs) = libs.root() {
-        if !stats.add_cell(libs.clone()) {
+        if !stats.add_cell(libs.as_ref()) {
             return StateLimitsResult::Exceeds;
         }
     }
@@ -358,7 +630,7 @@ pub fn check_state_limits(
     }
 
     // Ok
-    *stats_cache = Some(stats);
+    *storage_cache = Some(stats.into_storage_cache());
     StateLimitsResult::Fits
 }
 
@@ -371,55 +643,60 @@ pub const fn shift_ceil_price(value: u128) -> u128 {
 
 #[cfg(test)]
 mod tests {
+    use everscale_types::models::BlockchainConfig;
+
     use super::*;
 
     #[test]
-    fn miri_check() {
-        // Drop is ok.
-        let mut owned = OwnedExtStorageStat::with_limits(StorageStatLimits {
-            bit_count: 1000,
-            cell_count: 1000,
-        });
+    fn new_storage_stat_works() -> anyhow::Result<()> {
+        let cell = Boc::decode(include_bytes!("../res/config.boc"))?;
+        let target_stats = cell.compute_unique_stats(usize::MAX).unwrap();
+        println!("target_stats: {target_stats:?}");
 
-        fn fill(owned: &mut OwnedExtStorageStat) {
-            let res = owned.add_cell(Cell::empty_cell());
-            assert!(res);
-            assert_eq!(owned.inner.bits, 0);
-            assert_eq!(owned.inner.cells, 1);
+        let mut new_storage_stats = NewStorageStat::with_limits(StorageStatLimits::UNLIMITED, None);
+        assert!(new_storage_stats.add_cell(cell.as_ref()));
+        assert_eq!(
+            CellTreeStats {
+                bit_count: new_storage_stats.bits as u64,
+                cell_count: new_storage_stats.cells as u64,
+            },
+            target_stats
+        );
 
-            let res = owned.add_cell({
-                let mut b = CellBuilder::new();
-                b.store_u32(123).unwrap();
-                b.store_reference(Cell::empty_cell()).unwrap();
-                b.build().unwrap()
-            });
-            assert!(res);
-            assert_eq!(owned.inner.bits, 32);
-            assert_eq!(owned.inner.cells, 2);
+        let prev_storage_stats = {
+            let mut config = cell.parse::<BlockchainConfig>()?;
+            config.params.set_fundamental_addresses(&[
+                HashBytes([0x33; 32]),
+                HashBytes([0x55; 32]),
+                HashBytes([0x66; 32]),
+            ])?;
+            let cell = CellBuilder::build_from(config)?;
+            let mut stat = NewStorageStat::with_limits(StorageStatLimits::UNLIMITED, None);
+            assert!(stat.add_cell(cell.as_ref()));
+            stat.into_storage_cache()
+        };
 
-            // Create the same cell as above to possibly trigger a dangling pointer access.
-            let res = owned.add_cell({
-                let mut b = CellBuilder::new();
-                b.store_u32(123).unwrap();
-                b.store_reference(Cell::empty_cell()).unwrap();
-                b.build().unwrap()
-            });
-            assert!(res);
-            assert_eq!(owned.inner.bits, 32);
-            assert_eq!(owned.inner.cells, 2);
-        }
+        let mut new_storage_stats =
+            NewStorageStat::with_limits(StorageStatLimits::UNLIMITED, Some(&prev_storage_stats));
+        assert!(new_storage_stats.add_cell(cell.as_ref()));
+        assert_eq!(
+            CellTreeStats {
+                bit_count: new_storage_stats.bits as u64,
+                cell_count: new_storage_stats.cells as u64,
+            },
+            target_stats
+        );
 
-        fill(&mut owned);
-        drop(owned);
+        let mut cache = new_storage_stats
+            .into_storage_cache()
+            .into_final(Some(&prev_storage_stats));
+        cache.add_cell(cell.as_ref());
+        assert_eq!(cache.compute_stats(), target_stats);
 
-        // Clear is ok.
-        let mut owned = OwnedExtStorageStat::with_limits(StorageStatLimits {
-            bit_count: 1000,
-            cell_count: 1000,
-        });
+        let mut cache = StorageCache::default().into_final(Some(&prev_storage_stats));
+        cache.add_cell(cell.as_ref());
+        assert_eq!(cache.compute_stats(), target_stats);
 
-        fill(&mut owned);
-        owned.clear();
-        fill(&mut owned);
+        Ok(())
     }
 }

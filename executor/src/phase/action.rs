@@ -241,13 +241,18 @@ impl ExecutorState<'_> {
         if !self.is_special {
             let limits = &self.config.size_limits;
             let is_masterchain = self.address.is_masterchain();
+            let prev_storage_cache = ctx
+                .inspector
+                .as_ref()
+                .and_then(|item| item.storage_cache.as_deref());
             let check = match &self.state {
                 AccountState::Active(current_state) => check_state_limits_diff(
                     current_state,
                     action_ctx.new_state,
                     limits,
                     is_masterchain,
-                    &mut self.cached_storage_stat,
+                    &mut self.storage_cache,
+                    prev_storage_cache,
                 ),
                 AccountState::Uninit | AccountState::Frozen(_) => check_state_limits(
                     action_ctx.new_state.code.as_ref(),
@@ -255,7 +260,8 @@ impl ExecutorState<'_> {
                     &action_ctx.new_state.libraries,
                     limits,
                     is_masterchain,
-                    &mut self.cached_storage_stat,
+                    &mut self.storage_cache,
+                    prev_storage_cache,
                 ),
             };
 
@@ -312,7 +318,7 @@ impl ExecutorState<'_> {
                 // Leave account as uninit if it still has some extra currencies.
                 AccountStatus::Uninit
             };
-            self.cached_storage_stat = None;
+            self.storage_cache = None;
         }
 
         if let Some(fees) = action_ctx.action_phase.total_action_fees {

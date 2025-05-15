@@ -532,12 +532,10 @@ impl<'a> VmState<'a> {
         }
 
         if mode.contains(SaveCr::C0) {
-            res.data.save.c[0] =
-                std::mem::replace(&mut self.cr.c[0], Some(self.quit0.clone().into_dyn_cont()));
+            res.data.save.c[0] = self.cr.c[0].replace(self.quit0.clone().into_dyn_cont());
         }
         if mode.contains(SaveCr::C1) {
-            res.data.save.c[1] =
-                std::mem::replace(&mut self.cr.c[1], Some(self.quit1.clone().into_dyn_cont()));
+            res.data.save.c[1] = self.cr.c[1].replace(self.quit1.clone().into_dyn_cont());
         }
         if mode.contains(SaveCr::C2) {
             res.data.save.c[2] = self.cr.c[2].take();
@@ -930,18 +928,14 @@ impl<'a> VmState<'a> {
     }
 
     fn take_c0(&mut self) -> VmResult<RcCont> {
-        let Some(cont) =
-            std::mem::replace(&mut self.cr.c[0], Some(self.quit0.clone().into_dyn_cont()))
-        else {
+        let Some(cont) = self.cr.c[0].replace(self.quit0.clone().into_dyn_cont()) else {
             vm_bail!(InvalidOpcode);
         };
         Ok(cont)
     }
 
     fn take_c1(&mut self) -> VmResult<RcCont> {
-        let Some(cont) =
-            std::mem::replace(&mut self.cr.c[1], Some(self.quit1.clone().into_dyn_cont()))
-        else {
+        let Some(cont) = self.cr.c[1].replace(self.quit1.clone().into_dyn_cont()) else {
             vm_bail!(InvalidOpcode);
         };
         Ok(cont)

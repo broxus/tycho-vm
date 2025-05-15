@@ -13,7 +13,7 @@ use everscale_types::prelude::*;
 pub use self::config::ParsedConfig;
 pub use self::error::{TxError, TxResult};
 use self::util::new_varuint56_truncate;
-pub use self::util::{ExtStorageStat, OwnedExtStorageStat, StorageStatLimits};
+pub use self::util::{ExtStorageStat, StorageCache, StorageStatLimits};
 
 mod config;
 mod error;
@@ -188,7 +188,7 @@ impl<'a> Executor<'a> {
             out_msgs: Vec::new(),
             total_fees: Tokens::ZERO,
             burned: Tokens::ZERO,
-            cached_storage_stat: None,
+            storage_cache: None,
         })
     }
 }
@@ -207,6 +207,8 @@ pub struct ExecutorInspector<'e> {
     pub exit_code: Option<i32>,
     /// Debug output target.
     pub debug: Option<&'e mut dyn std::fmt::Write>,
+    /// Storage cache from the previous execution.
+    pub storage_cache: Option<&'e mut StorageCache>,
 }
 
 /// Public library diff operation.
@@ -248,7 +250,7 @@ pub struct ExecutorState<'a> {
 
     pub burned: Tokens,
 
-    pub cached_storage_stat: Option<OwnedExtStorageStat>,
+    pub storage_cache: Option<StorageCache>,
 }
 
 #[cfg(test)]
@@ -273,7 +275,7 @@ impl<'a> ExecutorState<'a> {
             out_msgs: Vec::new(),
             total_fees: Tokens::ZERO,
             burned: Tokens::ZERO,
-            cached_storage_stat: None,
+            storage_cache: None,
         }
     }
 
@@ -419,7 +421,16 @@ impl<'a, 's> UncommittedTransaction<'a, 's> {
     }
 
     /// Creates a final transaction and a new contract state.
-    pub fn commit(mut self) -> Result<ExecutorOutput> {
+    #[inline]
+    pub fn commit(self) -> Result<ExecutorOutput> {
+        self.commit_ext(None)
+    }
+
+    /// Creates a final transaction and a new contract state.
+    pub fn commit_ext(
+        mut self,
+        inspector: Option<&mut ExecutorInspector<'_>>,
+    ) -> Result<ExecutorOutput> {
         // Collect brief account state info and build new account state.
         let account_state;
         let new_state_meta;
@@ -434,6 +445,13 @@ impl<'a, 's> UncommittedTransaction<'a, 's> {
                     libraries: Dict::new(),
                     exists: false,
                 };
+
+                // Reset inspector storage cache.
+                if let Some(inspector) = inspector {
+                    if let Some(storage_cache) = &mut inspector.storage_cache {
+                        storage_cache.clear();
+                    }
+                }
 
                 // Done
                 AccountStatus::NotExists
@@ -470,7 +488,8 @@ impl<'a, 's> UncommittedTransaction<'a, 's> {
                 self.exec.storage_stat.used = compute_storage_used(
                     prev_account_storage,
                     account_storage.as_full_slice(),
-                    &mut self.exec.cached_storage_stat,
+                    self.exec.storage_cache.take(),
+                    inspector.and_then(|item| item.storage_cache.as_deref_mut()),
                     self.exec.params.strict_extra_currency,
                 )?;
 
@@ -599,7 +618,8 @@ impl<'a, 's> UncommittedTransaction<'a, 's> {
 fn compute_storage_used(
     mut prev: Option<(StorageUsed, CellSlice<'_>)>,
     mut new_storage: CellSlice<'_>,
-    cache: &mut Option<OwnedExtStorageStat>,
+    storage_cache: Option<StorageCache>,
+    prev_storage_cache: Option<&'_ mut StorageCache>,
     without_extra_currencies: bool,
 ) -> Result<StorageUsed> {
     fn skip_extra(slice: &mut CellSlice<'_>) -> Result<bool, Error> {
@@ -658,14 +678,21 @@ fn compute_storage_used(
     }
 
     // Init cache.
-    let cache = cache.get_or_insert_with(OwnedExtStorageStat::unlimited);
-    cache.set_unlimited();
+    let mut cache = storage_cache
+        .unwrap_or_else(|| StorageCache::with_target_capacity(prev_storage_cache.as_deref()))
+        .into_final(prev_storage_cache.as_deref());
 
     // Compute stats for childern.
-    for cell in new_storage.references().cloned() {
+    for cell in new_storage.references() {
         cache.add_cell(cell);
     }
-    let stats = cache.stats();
+
+    let stats = cache.compute_stats();
+
+    let cache = cache.into_storage_cache();
+    if let Some(prev_storage_cache) = prev_storage_cache {
+        *prev_storage_cache = cache;
+    }
 
     // Done.
     Ok(StorageUsed {

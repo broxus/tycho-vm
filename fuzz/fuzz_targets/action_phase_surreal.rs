@@ -50,7 +50,7 @@ fuzz_target!(|input: Input| {
         out_msgs: Vec::new(),
         total_fees: gas_fees,
         burned: Tokens::ZERO,
-        cached_storage_stat: None,
+        storage_cache: None,
     };
 
     // Run transaction part.

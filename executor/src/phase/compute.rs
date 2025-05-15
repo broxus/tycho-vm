@@ -197,13 +197,18 @@ impl ExecutorState<'_> {
                     limits.max_acc_public_libraries = 0;
                 }
 
+                let prev_storage_cache = ctx
+                    .inspector
+                    .as_ref()
+                    .and_then(|item| item.storage_cache.as_deref());
                 if matches!(
                     check_state_limits_diff(
                         &res.new_state,
                         &from_msg.parsed,
                         &limits,
                         is_masterchain,
-                        &mut self.cached_storage_stat,
+                        &mut self.storage_cache,
+                        prev_storage_cache,
                     ),
                     StateLimitsResult::Exceeds
                 ) {
