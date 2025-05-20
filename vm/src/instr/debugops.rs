@@ -1,4 +1,3 @@
-#[cfg(feature = "dump")]
 use everscale_types::prelude::*;
 use tycho_vm_proc::vm_module;
 
@@ -8,6 +7,8 @@ use crate::error::VmResult;
 #[cfg(feature = "dump")]
 use crate::error::{DumpError, DumpResult};
 use crate::state::VmState;
+#[cfg(any(feature = "dump", feature = "tracing"))]
+use crate::util::CellSliceExt;
 
 pub struct DebugOps;
 
@@ -52,8 +53,12 @@ impl DebugOps {
 
         if let Some(value) = st.stack.items.last() {
             if let Some(slice) = value.as_cell_slice() {
-                // TODO: print as string, but why is it needed?
-                writeln!(&mut *debug, "#DEBUG#: {}", slice.apply().display_data()).unwrap();
+                writeln!(
+                    &mut *debug,
+                    "#DEBUG#: {}",
+                    DisplaySliceString(slice.apply())
+                )
+                .unwrap();
             } else {
                 writeln!(&mut *debug, "#DEBUG#: is not a slice").unwrap();
             }
@@ -92,6 +97,17 @@ impl DebugOps {
             st.code.range().has_remaining(bits + data_bits, 0),
             InvalidOpcode
         );
+
+        if let Some(debug) = &mut st.debug {
+            let mut slice = st.code.apply();
+            slice.skip_first(bits, 0)?;
+            slice.only_first(data_bits, 0)?;
+            vm_log_op!("DEBUGSTR {}", slice.display_as_stack_value());
+            writeln!(&mut *debug, "#DEBUG#: {}", DisplaySliceString(slice)).unwrap();
+        } else {
+            vm_log_op!("DEBUGSTR");
+        }
+
         let ok = st.code.range_mut().skip_first(bits + data_bits, 0).is_ok();
         debug_assert!(ok);
 
@@ -109,7 +125,123 @@ impl DebugOps {
         if !code.has_remaining(bits + data_bits, 0) {
             return Err(DumpError::InvalidOpcode);
         }
-        code.skip_first(bits + data_bits, 0)?;
-        f.record_opcode(&"DEBUGSTR")
+        code.skip_first(bits, 0)?;
+
+        let mut slice = *code;
+        slice.only_first(data_bits, 0)?;
+        code.skip_first(data_bits, 0)?;
+
+        f.record_slice(slice)?;
+        f.record_opcode(&format_args!("DEBUGSTR {}", slice.display_as_stack_value()))
+    }
+}
+
+struct DisplaySliceString<'a>(CellSlice<'a>);
+
+impl std::fmt::Display for DisplaySliceString<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        const MAX_BIT_LEN: u16 = 127 * 8;
+
+        match (|bytes| {
+            let bit_len = self.0.size_bits();
+            if bit_len > MAX_BIT_LEN || bit_len % 8 != 0 {
+                return None;
+            }
+
+            let mut slice = self.0;
+            let mut bytes = &*slice.load_raw(bytes, bit_len).ok()?;
+            while let [rest @ .., last] = bytes {
+                if *last == 0 || last.is_ascii_whitespace() {
+                    bytes = rest;
+                } else {
+                    break;
+                }
+            }
+
+            std::str::from_utf8(bytes).ok()
+        })(&mut [0; 128])
+        {
+            Some(bytes) => f.write_str(bytes),
+            None => write!(f, "x{:X}", self.0.display_data()),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use tracing_test::traced_test;
+
+    use super::*;
+
+    #[test]
+    #[traced_test]
+    fn strdump_works() {
+        let output = run_get_dump(tvmasm!(
+            r#"
+            SLICE x{48656C6C6F2C20776F726C6421}
+            STRDUMP
+            "#,
+        ));
+        assert_eq!(output, "#DEBUG#: Hello, world!\n");
+
+        let output = run_get_dump(tvmasm!(
+            r#"
+            SLICE x{5370616365732020202020202020202020202020}
+            STRDUMP
+            "#,
+        ));
+        assert_eq!(output, "#DEBUG#: Spaces\n");
+
+        let output = run_get_dump(tvmasm!(
+            r#"
+            SLICE x{0000}
+            STRDUMP
+            "#,
+        ));
+        assert_eq!(output, "#DEBUG#: \n");
+
+        let output = run_get_dump(tvmasm!(
+            r#"
+            SLICE x{0000abab}
+            STRDUMP
+            "#,
+        ));
+        assert_eq!(output, "#DEBUG#: x0000ABAB\n");
+
+        let output = run_get_dump(tvmasm!(
+            r#"
+            SLICE x{00c_}
+            STRDUMP
+            "#,
+        ));
+        assert_eq!(output, "#DEBUG#: x00C_\n");
+    }
+
+    #[test]
+    #[traced_test]
+    fn debugstr_works() {
+        let output = run_get_dump(tvmasm!("@inline x{fefc48656C6C6F2C20776F726C6421}"));
+        assert_eq!(output, "#DEBUG#: Hello, world!\n");
+
+        let output = run_get_dump(tvmasm!("@inline x{feff53706163657320202020202020202020}"));
+        assert_eq!(output, "#DEBUG#: Spaces\n");
+
+        let output = run_get_dump(tvmasm!("@inline x{fef10000}"));
+        assert_eq!(output, "#DEBUG#: \n");
+
+        let output = run_get_dump(tvmasm!("@inline x{fef30000abab}"));
+        assert_eq!(output, "#DEBUG#: x0000ABAB\n");
+    }
+
+    fn run_get_dump(code: &[u8]) -> String {
+        let code = Boc::decode(code).unwrap();
+
+        let mut debug_output = String::new();
+        let mut vm = VmState::builder()
+            .with_code(code)
+            .with_debug(&mut debug_output)
+            .build();
+        assert_eq!(!vm.run(), 0);
+        debug_output
     }
 }
