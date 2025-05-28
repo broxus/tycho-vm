@@ -295,6 +295,7 @@ mod tests {
                 cells: VarUint56::new(1),
                 ..Default::default()
             },
+            storage_extra: Default::default(),
             last_paid: params.block_unixtime - 1000,
             due_payment: Some(Tokens::new(2 * config.gas_prices.freeze_due_limit as u128)),
         };
