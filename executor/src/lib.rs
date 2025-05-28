@@ -7,7 +7,7 @@ use everscale_types::models::{
     Message, OwnedMessage, ShardAccount, SimpleLib, StdAddr, StorageInfo, StorageUsed, TickTock,
     Transaction, TxInfo,
 };
-use everscale_types::num::{Tokens, Uint15, VarUint56};
+use everscale_types::num::{Tokens, Uint15};
 use everscale_types::prelude::*;
 
 pub use self::config::ParsedConfig;
@@ -162,6 +162,7 @@ impl<'a> Executor<'a> {
                 acc_address = address.clone();
                 acc_storage_stat = StorageInfo {
                     used: StorageUsed::ZERO,
+                    storage_extra: Default::default(),
                     last_paid: 0,
                     due_payment: None,
                 };
@@ -652,7 +653,6 @@ fn compute_storage_used(
                 ),
                 // All other stats are unchanged.
                 cells: prev_used.cells,
-                public_cells: prev_used.public_cells,
             });
         }
     }
@@ -671,7 +671,6 @@ fn compute_storage_used(
     Ok(StorageUsed {
         cells: new_varuint56_truncate(stats.cell_count.saturating_add(1)),
         bits: new_varuint56_truncate(stats.bit_count.saturating_add(new_storage.size_bits() as _)),
-        public_cells: VarUint56::ZERO,
     })
 }
 

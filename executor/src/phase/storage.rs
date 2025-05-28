@@ -198,6 +198,7 @@ mod tests {
                 cells: VarUint56::new(10),
                 ..Default::default()
             },
+            storage_extra: Default::default(),
             last_paid: 1000,
             due_payment: None,
         };
@@ -252,6 +253,7 @@ mod tests {
                 cells: VarUint56::new(10),
                 ..Default::default()
             },
+            storage_extra: Default::default(),
             last_paid: 1000,
             due_payment: None,
         };
@@ -329,6 +331,7 @@ mod tests {
                 cells: VarUint56::new(10),
                 ..Default::default()
             },
+            storage_extra: Default::default(),
             last_paid: 1000,
             due_payment: Some(Tokens::new(config.gas_prices.freeze_due_limit as u128 - 50)),
         };
