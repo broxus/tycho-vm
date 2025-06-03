@@ -1,3 +1,5 @@
+[![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/broxus/tycho-vm)
+
 ## Tycho VM and Executor
 
 Rust implementation of the TON Virtual Machine and executor.
