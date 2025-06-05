@@ -1,5 +1,3 @@
-[![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/broxus/tycho-vm)
-
 ## Tycho VM and Executor
 
 Rust implementation of the TON Virtual Machine and executor.
@@ -82,6 +80,9 @@ cargo +nightly fuzz run vm_only_code -j 12
 ## Contributing
 
 We welcome contributions to the project! If you notice any issues or errors, feel free to open an issue or submit a pull request.
+
+## AI Documentation
+[![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/broxus/tycho-vm)
 
 ## License
 
