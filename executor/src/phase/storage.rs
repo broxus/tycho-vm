@@ -196,7 +196,6 @@ mod tests {
             used: StorageUsed {
                 bits: VarUint56::new(1000),
                 cells: VarUint56::new(10),
-                ..Default::default()
             },
             storage_extra: Default::default(),
             last_paid: 1000,
@@ -251,7 +250,6 @@ mod tests {
             used: StorageUsed {
                 bits: VarUint56::new(1000),
                 cells: VarUint56::new(10),
-                ..Default::default()
             },
             storage_extra: Default::default(),
             last_paid: 1000,
@@ -329,7 +327,6 @@ mod tests {
             used: StorageUsed {
                 bits: VarUint56::new(1000),
                 cells: VarUint56::new(10),
-                ..Default::default()
             },
             storage_extra: Default::default(),
             last_paid: 1000,

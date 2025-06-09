@@ -471,6 +471,10 @@ impl<'l> GasConsumer<'l> {
         (self.gas_base.get() as i64).saturating_sub(self.gas_remaining.get()) as u64
     }
 
+    pub fn free_gas_consumed(&self) -> u64 {
+        self.free_gas_consumed.get()
+    }
+
     pub fn remaining(&self) -> i64 {
         self.gas_remaining.get()
     }

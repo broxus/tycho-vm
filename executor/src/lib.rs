@@ -206,6 +206,9 @@ pub struct ExecutorInspector<'e> {
     pub public_libs_diff: Vec<PublicLibraryChange>,
     /// Compute phase exit code.
     pub exit_code: Option<i32>,
+    /// Total gas consumed (including the remaining "free" gas
+    /// and everything that exceeds the limit).
+    pub total_gas_used: u64,
     /// Debug output target.
     pub debug: Option<&'e mut dyn std::fmt::Write>,
 }
@@ -364,11 +367,6 @@ pub struct UncommittedTransaction<'a, 's> {
     exec: ExecutorState<'a>,
     in_msg: Option<Cell>,
     info: Lazy<TxInfo>,
-    brief_info: BriefTxInfo,
-}
-
-struct BriefTxInfo {
-    gas_used: u64,
 }
 
 impl<'a, 's> UncommittedTransaction<'a, 's> {
@@ -379,27 +377,13 @@ impl<'a, 's> UncommittedTransaction<'a, 's> {
         in_msg: Option<Cell>,
         info: impl Into<TxInfo>,
     ) -> Result<Self> {
-        use everscale_types::models::ComputePhase;
-
         let info = info.into();
-        let gas_used = match &info {
-            TxInfo::Ordinary(info) => match &info.compute_phase {
-                ComputePhase::Executed(phase) => phase.gas_used.into_inner(),
-                ComputePhase::Skipped(_) => 0,
-            },
-            TxInfo::TickTock(info) => match &info.compute_phase {
-                ComputePhase::Executed(phase) => phase.gas_used.into_inner(),
-                ComputePhase::Skipped(_) => 0,
-            },
-        };
-
         let info = Lazy::new(&info)?;
         Ok(Self {
             original,
             exec,
             in_msg,
             info,
-            brief_info: BriefTxInfo { gas_used },
         })
     }
 
@@ -513,7 +497,6 @@ impl<'a, 's> UncommittedTransaction<'a, 's> {
             total_fees: self.exec.total_fees,
             next_lt: self.exec.end_lt,
             out_msgs: self.exec.out_msgs,
-            gas_used: self.brief_info.gas_used,
         };
 
         // New shard account state.
@@ -695,9 +678,11 @@ pub struct AccountMeta {
 /// Short transaction description.
 #[derive(Clone, Debug)]
 pub struct TransactionMeta {
+    /// A sum of all collected fees from all phases.
     pub total_fees: Tokens,
+    /// List of outbound messages.
     pub out_msgs: Vec<Lazy<OwnedMessage>>,
-    pub gas_used: u64,
+    /// Minimal logical time for the next transaction on this account.
     pub next_lt: u64,
 }
 

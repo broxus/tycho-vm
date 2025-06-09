@@ -293,7 +293,6 @@ mod tests {
             used: StorageUsed {
                 bits: VarUint56::new(128),
                 cells: VarUint56::new(1),
-                ..Default::default()
             },
             storage_extra: Default::default(),
             last_paid: params.block_unixtime - 1000,

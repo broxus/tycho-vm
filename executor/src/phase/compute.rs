@@ -287,9 +287,11 @@ impl ExecutorState<'_> {
         // Connect inspected output as debug.
         let mut inspector_actions = None;
         let mut inspector_exit_code = None;
+        let mut inspector_total_gas_used = None;
         if let Some(inspector) = ctx.inspector {
             inspector_actions = Some(&mut inspector.actions);
             inspector_exit_code = Some(&mut inspector.exit_code);
+            inspector_total_gas_used = Some(&mut inspector.total_gas_used);
             if let Some(debug) = inspector.debug.as_deref_mut() {
                 vm.debug = Some(debug);
             }
@@ -302,6 +304,11 @@ impl ExecutorState<'_> {
             *inspector_exit_code = Some(exit_code);
         }
 
+        let consumed_paid_gas = vm.gas.consumed();
+        if let Some(total_gas_used) = inspector_total_gas_used {
+            *total_gas_used = consumed_paid_gas.saturating_add(vm.gas.free_gas_consumed());
+        }
+
         // Parse VM state.
         res.accepted = ctx.force_accept || vm.gas.credit() == 0;
         debug_assert!(
@@ -311,7 +318,7 @@ impl ExecutorState<'_> {
 
         let success = res.accepted && vm.committed_state.is_some();
 
-        let gas_used = std::cmp::min(vm.gas.consumed(), vm.gas.limit());
+        let gas_used = std::cmp::min(consumed_paid_gas, vm.gas.limit());
         let gas_fees = if res.accepted && !self.is_special {
             self.config
                 .gas_prices(is_masterchain)
