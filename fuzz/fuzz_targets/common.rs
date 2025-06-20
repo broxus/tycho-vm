@@ -2,7 +2,7 @@ use std::rc::Rc;
 
 use arbitrary::{Arbitrary, Unstructured};
 use everscale_types::boc::BocRepr;
-use everscale_types::models::{BlockchainConfig, ExecutedComputePhase, SizeLimitsConfig};
+use everscale_types::models::{BlockchainConfig, ExecutedComputePhase};
 use everscale_types::num::Tokens;
 use tycho_executor::{ExecutorParams, ParsedConfig};
 
@@ -38,18 +38,7 @@ pub fn make_default_config() -> Rc<ParsedConfig> {
             config.params.set_global_id(100).unwrap();
 
             // TODO: Update config BOC
-            config.params.set_size_limits(&SizeLimitsConfig {
-                max_msg_bits: 1 << 21,
-                max_msg_cells: 1 << 13,
-                max_library_cells: 1000,
-                max_vm_data_depth: 512,
-                max_ext_msg_size: 65535,
-                max_ext_msg_depth: 512,
-                max_acc_state_cells: 1 << 16,
-                max_acc_state_bits: (1 << 16) * 1023,
-                max_acc_public_libraries: 256,
-                defer_out_queue_size_limit: 256,
-            }).unwrap();
+            config.params.set_size_limits(&ParsedConfig::DEFAULT_SIZE_LIMITS_CONFIG).unwrap();
 
             Rc::new(ParsedConfig::parse(config, u32::MAX).unwrap())
         };
