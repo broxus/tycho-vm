@@ -70,9 +70,21 @@ impl ParsedConfig {
         let global = config.params.get_global_version()?;
 
         // Fallback to default if param not present in config?
-        let Some(size_limits_raw) = dict.get(43)? else {
-            return Err(Error::CellUnderflow);
-        };
+        let size_limits_raw = dict.get(43)?.unwrap_or_else(|| {
+            CellBuilder::build_from(SizeLimitsConfig {
+                max_msg_bits: 1 << 21,
+                max_msg_cells: 1 << 13,
+                max_library_cells: 1000,
+                max_vm_data_depth: 512,
+                max_ext_msg_size: 65535,
+                max_ext_msg_depth: 512,
+                max_acc_state_cells: 1 << 16,
+                max_acc_state_bits: (1 << 16) * 1023,
+                max_acc_public_libraries: 256,
+                defer_out_queue_size_limit: 256,
+            })
+            .unwrap()
+        });
 
         let mut special_accounts = HashSet::default();
         for addr in config.params.get_fundamental_addresses()?.keys() {
