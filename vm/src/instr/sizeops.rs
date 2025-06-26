@@ -1,14 +1,14 @@
-use everscale_types::cell::{LoadMode, RefsIter};
-use everscale_types::error::Error;
-use everscale_types::prelude::*;
 use num_traits::{Signed, ToPrimitive};
+use tycho_types::cell::{LoadMode, RefsIter};
+use tycho_types::error::Error;
+use tycho_types::prelude::*;
 use tycho_vm_proc::vm_module;
 
+use crate::GasConsumer;
 use crate::error::VmResult;
 use crate::saferc::SafeRc;
 use crate::stack::StackValueType;
 use crate::state::VmState;
-use crate::GasConsumer;
 
 pub struct SizeOps;
 
@@ -162,9 +162,9 @@ struct CellTreeStatsExt {
 
 #[cfg(test)]
 mod tests {
-    use everscale_types::prelude::*;
     use rand::Rng;
     use tracing_test::traced_test;
+    use tycho_types::prelude::*;
 
     use crate::OwnedCellSlice;
 
@@ -224,17 +224,17 @@ mod tests {
 
         fn make_huge_cell(rng: &mut impl Rng, depth: u8) -> Cell {
             if depth == 0 {
-                CellBuilder::build_from(rng.gen::<HashBytes>()).unwrap()
+                CellBuilder::build_from(rng.random::<HashBytes>()).unwrap()
             } else {
                 CellBuilder::build_from((
-                    rng.gen::<HashBytes>(),
+                    rng.random::<HashBytes>(),
                     make_huge_cell(rng, depth - 1),
                     make_huge_cell(rng, depth - 1),
                 ))
                 .unwrap()
             }
         }
-        let huge_cell = make_huge_cell(&mut rand::thread_rng(), 10);
+        let huge_cell = make_huge_cell(&mut rand::rng(), 10);
         assert_run_vm!("CDATASIZE", [cell huge_cell.clone(), int 2048] => [int 2047, int 524032, int 2046]);
         assert_run_vm!("CDATASIZEQ", [cell huge_cell.clone(), int 100] => [int 0]);
         assert_run_vm!("CDATASIZE", gas: 10000, [cell huge_cell.clone(), int 2048] => [int 10026], exit_code: -14);

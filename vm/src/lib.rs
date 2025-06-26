@@ -1,6 +1,6 @@
 #[cfg(test)]
 #[macro_use]
-extern crate everscale_asm_macros;
+extern crate tycho_asm_macros;
 extern crate self as tycho_vm;
 
 /// Prevents using `From::from` for plain error conversion.
@@ -57,7 +57,7 @@ macro_rules! tuple_impl {
     (@v [$($values:tt)*] cell $value:expr $(, $($tt:tt)* )?) => {
         $crate::tuple_impl!(@v [
             $($values)* $crate::SafeRc::into_dyn_value(
-                $crate::SafeRc::<::everscale_types::cell::Cell>::new($value)
+                $crate::SafeRc::<::tycho_types::cell::Cell>::new($value)
             ),
         ] $($($tt)*)?)
     };
@@ -73,7 +73,7 @@ macro_rules! tuple_impl {
     (@v [$($values:tt)*] builder $value:expr $(, $($tt:tt)* )?) => {
         $crate::tuple_impl!(@v [
             $($values)* $crate::SafeRc::into_dyn_value(
-                $crate::SafeRc::<::everscale_types::cell::CellBuilder>::new($value)
+                $crate::SafeRc::<::tycho_types::cell::CellBuilder>::new($value)
             ),
         ] $($($tt)*)?)
     };
@@ -183,10 +183,10 @@ pub use self::gas::{
 };
 pub use self::instr::{codepage, codepage0};
 #[cfg(feature = "tracing")]
-pub use self::log::{VmLogRows, VmLogRowsGuard, VmLogSubscriber, VM_LOG_TARGET};
+pub use self::log::{VM_LOG_TARGET, VmLogRows, VmLogRowsGuard, VmLogSubscriber};
 pub use self::saferc::{SafeDelete, SafeRc, SafeRcMakeMut};
 pub use self::smc_info::{
-    CustomSmcInfo, SmcInfo, SmcInfoBase, SmcInfoTonV11, SmcInfoTonV4, SmcInfoTonV6, UnpackedConfig,
+    CustomSmcInfo, SmcInfo, SmcInfoBase, SmcInfoTonV4, SmcInfoTonV6, SmcInfoTonV11, UnpackedConfig,
     UnpackedInMsgSmcInfo, VmVersion,
 };
 pub use self::stack::{
@@ -216,7 +216,7 @@ mod util;
 
 #[doc(hidden)]
 pub mod __export {
-    pub use {everscale_types, num_bigint};
+    pub use {num_bigint, tycho_types};
 }
 
 #[doc(hidden)]
@@ -255,9 +255,9 @@ mod __private {
 mod tests {
     use std::collections::HashMap;
 
-    use everscale_types::models::{CurrencyCollection, SimpleLib, StdAddr};
-    use everscale_types::prelude::*;
     use tracing_test::traced_test;
+    use tycho_types::models::{CurrencyCollection, SimpleLib, StdAddr};
+    use tycho_types::prelude::*;
 
     use super::*;
     use crate::stack::{RcStackValue, Tuple};
@@ -362,7 +362,9 @@ mod tests {
     #[test]
     #[traced_test]
     fn library_cells_works() -> anyhow::Result<()> {
-        let library = Boc::decode_base64("te6ccuECDwEAA9EAABoAJAEkAS4CJgL+A5wEVAVSBkoGrgcsB1EHfAeiART/APSkE/S88sgLAQIBYgIDAvjQAdDTAwFxsI5IE18DgCDXIe1E0NMD+gD6QPpA0QTTHwGEDyGCEBeNRRm6AoIQe92X3roSsfL0gEDXIfoAMBKgQBMDyMsDWPoCAc8WAc8Wye1U4PpA+kAx+gAx9AH6ADH6AAExcPg6AtMfASCCEA+KfqW6joUwNFnbPOAzBAUCASANDgHyA9M/AQH6APpAIfpEMMAA8uFN7UTQ0wP6APpA+kDRUwnHBSRxsMAAIbHyrVIrxwVQCrHy4ElRFaEgwv/yr/gqVCWQcFRgBBMVA8jLA1j6AgHPFgHPFskhyMsBE/QAEvQAywDJIPkAcHTIywLKB8v/ydAE+kD0AfoAIAYC0CKCEBeNRRm6joQyWts84DQhghBZXwe8uo6EMQHbPOAyIIIQ7tI207qOLzABgEDXIdMD0e1E0NMD+gD6QPpA0TNRQscF8uBKQDMDyMsDWPoCAc8WAc8Wye1U4GwhghDTchWMutyED/LwCAkBmCDXCwCa10vAAQHAAbDysZEw4siCEBeNRRkByx9QCgHLP1AI+gIjzxYBzxYm+gJQB88WyciAGAHLBVAEzxZw+gJAY3dQA8trzMzJRTcHALQhkXKRceL4OSBuk4EkJ5Eg4iFulDGBKHORAeJQI6gToHOBA6Nw+DygAnD4NhKgAXD4NqBzgQQJghAJZgGAcPg3oLzysASAUPsAWAPIywNY+gIBzxYBzxbJ7VQD9O1E0NMD+gD6QPpA0SNysMAC8m0H0z8BAfoAUUGgBPpA+kBTuscF+CpUZOBwVGAEExUDyMsDWPoCAc8WAc8WySHIywET9AAS9ADLAMn5AHB0yMsCygfL/8nQUAzHBRux8uBKCfoAIZJfBOMNJtcLAcAAs5MwbDPjDVUCCgsMAfLtRNDTA/oA+kD6QNEG0z8BAfoA+kD0AdFRQaFSiMcF8uBJJsL/8q/IghB73ZfeAcsfWAHLPwH6AiHPFljPFsnIgBgBywUmzxZw+gIBcVjLaszJA/g5IG6UMIEWn95xgQLycPg4AXD4NqCBGndw+DagvPKwAoBQ+wADDABgyIIQc2LQnAHLHyUByz9QBPoCWM8WWM8WyciAEAHLBSTPFlj6AgFxWMtqzMmAEfsAAHpQVKH4L6BzgQQJghAJZgGAcPg3tgly+wLIgBABywVQBc8WcPoCcAHLaoIQ1TJ22wHLH1gByz/JgQCC+wBZACADyMsDWPoCAc8WAc8Wye1UACe/2BdqJoaYH9AH0gfSBomfwVIJhAAhvFCPaiaGmB/QB9IH0gaK+Bz+s3AU")?;
+        let library = Boc::decode_base64(
+            "te6ccuECDwEAA9EAABoAJAEkAS4CJgL+A5wEVAVSBkoGrgcsB1EHfAeiART/APSkE/S88sgLAQIBYgIDAvjQAdDTAwFxsI5IE18DgCDXIe1E0NMD+gD6QPpA0QTTHwGEDyGCEBeNRRm6AoIQe92X3roSsfL0gEDXIfoAMBKgQBMDyMsDWPoCAc8WAc8Wye1U4PpA+kAx+gAx9AH6ADH6AAExcPg6AtMfASCCEA+KfqW6joUwNFnbPOAzBAUCASANDgHyA9M/AQH6APpAIfpEMMAA8uFN7UTQ0wP6APpA+kDRUwnHBSRxsMAAIbHyrVIrxwVQCrHy4ElRFaEgwv/yr/gqVCWQcFRgBBMVA8jLA1j6AgHPFgHPFskhyMsBE/QAEvQAywDJIPkAcHTIywLKB8v/ydAE+kD0AfoAIAYC0CKCEBeNRRm6joQyWts84DQhghBZXwe8uo6EMQHbPOAyIIIQ7tI207qOLzABgEDXIdMD0e1E0NMD+gD6QPpA0TNRQscF8uBKQDMDyMsDWPoCAc8WAc8Wye1U4GwhghDTchWMutyED/LwCAkBmCDXCwCa10vAAQHAAbDysZEw4siCEBeNRRkByx9QCgHLP1AI+gIjzxYBzxYm+gJQB88WyciAGAHLBVAEzxZw+gJAY3dQA8trzMzJRTcHALQhkXKRceL4OSBuk4EkJ5Eg4iFulDGBKHORAeJQI6gToHOBA6Nw+DygAnD4NhKgAXD4NqBzgQQJghAJZgGAcPg3oLzysASAUPsAWAPIywNY+gIBzxYBzxbJ7VQD9O1E0NMD+gD6QPpA0SNysMAC8m0H0z8BAfoAUUGgBPpA+kBTuscF+CpUZOBwVGAEExUDyMsDWPoCAc8WAc8WySHIywET9AAS9ADLAMn5AHB0yMsCygfL/8nQUAzHBRux8uBKCfoAIZJfBOMNJtcLAcAAs5MwbDPjDVUCCgsMAfLtRNDTA/oA+kD6QNEG0z8BAfoA+kD0AdFRQaFSiMcF8uBJJsL/8q/IghB73ZfeAcsfWAHLPwH6AiHPFljPFsnIgBgBywUmzxZw+gIBcVjLaszJA/g5IG6UMIEWn95xgQLycPg4AXD4NqCBGndw+DagvPKwAoBQ+wADDABgyIIQc2LQnAHLHyUByz9QBPoCWM8WWM8WyciAEAHLBSTPFlj6AgFxWMtqzMmAEfsAAHpQVKH4L6BzgQQJghAJZgGAcPg3tgly+wLIgBABywVQBc8WcPoCcAHLaoIQ1TJ22wHLH1gByz/JgQCC+wBZACADyMsDWPoCAc8WAc8Wye1UACe/2BdqJoaYH9AH0gfSBomfwVIJhAAhvFCPaiaGmB/QB9IH0gaK+Bz+s3AU",
+        )?;
         let libraries = HashMap::from([(
             "8f452d7a4dfd74066b682365177259ed05734435be76b5fd4bd5d8af2b7c3d68"
                 .parse::<HashBytes>()?,
@@ -378,7 +380,9 @@ mod tests {
         let mut code =
             Boc::decode_base64("te6ccgEBAQEAIwAIQgKPRS16Tf10BmtoI2UXclntBXNENb52tf1L1divK3w9aA==")?;
 
-        let data = Boc::decode_base64("te6ccgEBAQEATAAAkwYKW203ZzmABH9S8yMeP84FtyIBfwh9D44CvZmnNI5D0211guF4CZxwAsROplLUCShZxn2kTkyjrdZWWw4ol9ZAosUb+zcNiHf6")?;
+        let data = Boc::decode_base64(
+            "te6ccgEBAQEATAAAkwYKW203ZzmABH9S8yMeP84FtyIBfwh9D44CvZmnNI5D0211guF4CZxwAsROplLUCShZxn2kTkyjrdZWWw4ol9ZAosUb+zcNiHf6",
+        )?;
 
         let smc_info = SmcInfoBase::new()
             .with_now(1733142533)

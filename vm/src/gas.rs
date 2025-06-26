@@ -4,10 +4,10 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use ahash::HashSet;
-use everscale_types::cell::{CellParts, LoadMode};
-use everscale_types::error::Error;
-use everscale_types::models::{LibDescr, SimpleLib};
-use everscale_types::prelude::*;
+use tycho_types::cell::{CellParts, LoadMode};
+use tycho_types::error::Error;
+use tycho_types::models::{LibDescr, SimpleLib};
+use tycho_types::prelude::*;
 
 use crate::error::VmResult;
 use crate::saferc::SafeRc;

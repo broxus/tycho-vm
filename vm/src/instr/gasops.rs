@@ -110,9 +110,9 @@ fn exec_set_gas(st: &mut VmState, gas_limit: u64) -> VmResult<i32> {
 
 #[cfg(test)]
 mod tests {
-    use everscale_types::boc::Boc;
     use num_bigint::BigInt;
     use tracing_test::traced_test;
+    use tycho_types::boc::Boc;
 
     use crate::IntoCode;
 

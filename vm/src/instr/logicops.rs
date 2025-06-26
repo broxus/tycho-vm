@@ -1,6 +1,6 @@
-use everscale_types::prelude::*;
 use num_bigint::{BigInt, Sign};
 use num_traits::{One, Zero};
+use tycho_types::prelude::*;
 use tycho_vm_proc::vm_module;
 
 use crate::error::VmResult;

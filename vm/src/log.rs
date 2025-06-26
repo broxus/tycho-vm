@@ -46,7 +46,7 @@ macro_rules! vm_log_exec_location {
 
 #[cfg(feature = "tracing")]
 pub(crate) struct CodePosition<'a> {
-    pub cell_hash: &'a ::everscale_types::cell::HashBytes,
+    pub cell_hash: &'a ::tycho_types::cell::HashBytes,
     pub offset_bits: u16,
     pub offset_refs: u8,
 }
@@ -87,7 +87,7 @@ macro_rules! vm_log_c5 {
     ($c5:expr) => {
         tracing::trace!(
             target: $crate::log::VM_LOG_TARGET,
-            c5 = ::everscale_types::boc::Boc::encode_base64($c5),
+            c5 = ::tycho_types::boc::Boc::encode_base64($c5),
         )
     };
 }
@@ -113,7 +113,7 @@ mod subscriber {
     use std::num::NonZeroU64;
     use std::sync::{Arc, Mutex};
 
-    use tracing::{span, Subscriber};
+    use tracing::{Subscriber, span};
 
     use super::VM_LOG_TARGET;
     use crate::state::VmLogMask;

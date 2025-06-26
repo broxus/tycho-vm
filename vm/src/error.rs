@@ -1,4 +1,4 @@
-use everscale_types::error::Error;
+use tycho_types::error::Error;
 
 use crate::stack::StackValueType;
 
@@ -89,7 +89,7 @@ pub type DumpResult = Result<(), DumpError>;
 #[derive(thiserror::Error, Debug)]
 pub enum DumpError {
     #[error(transparent)]
-    InvalidCode(#[from] everscale_types::error::Error),
+    InvalidCode(#[from] tycho_types::error::Error),
     #[error("invalid opcode")]
     InvalidOpcode,
     #[error("unexpected cell")]

@@ -1,6 +1,6 @@
-use everscale_types::dict::DictKey;
-use everscale_types::error::Error;
-use everscale_types::prelude::*;
+use tycho_types::dict::DictKey;
+use tycho_types::error::Error;
+use tycho_types::prelude::*;
 
 /// A wrapper around [`CellSliceParts`] extending its lifetime.
 #[derive(Default, Debug, Clone)]
@@ -19,22 +19,22 @@ impl OwnedCellSlice {
 
     #[inline]
     pub fn range(&self) -> CellSliceRange {
-        self.0 .0
+        self.0.0
     }
 
     #[inline]
     pub fn range_mut(&mut self) -> &mut CellSliceRange {
-        &mut self.0 .0
+        &mut self.0.0
     }
 
     #[inline]
     pub fn cell(&self) -> &Cell {
-        &self.0 .1
+        &self.0.1
     }
 
     #[inline]
     pub fn set_range(&mut self, range: CellSliceRange) {
-        self.0 .0 = range
+        self.0.0 = range
     }
 
     pub fn fits_into(&self, builder: &CellBuilder) -> bool {
@@ -164,7 +164,7 @@ pub fn load_uint_leq(cs: &mut CellSlice, upper_bound: u32) -> Result<u64, Error>
     Ok(result)
 }
 
-pub fn remove_trailing(slice: &mut CellSlice<'_>) -> Result<(), everscale_types::error::Error> {
+pub fn remove_trailing(slice: &mut CellSlice<'_>) -> Result<(), tycho_types::error::Error> {
     let bits = slice.size_bits();
     if bits == 0 {
         return Ok(());

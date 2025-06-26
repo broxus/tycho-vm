@@ -1,19 +1,19 @@
 use std::mem::ManuallyDrop;
 use std::rc::Rc;
 
-use everscale_types::error::Error;
-use everscale_types::prelude::*;
 #[cfg(feature = "tracing")]
 use tracing::instrument;
+use tycho_types::error::Error;
+use tycho_types::prelude::*;
 
 use crate::error::VmResult;
 use crate::saferc::{SafeDelete, SafeRc, SafeRcMakeMut};
 use crate::stack::{
-    load_slice_as_stack_value, store_slice_as_stack_value, RcStackValue, Stack, StackValue,
-    StackValueType, Tuple, TupleExt,
+    RcStackValue, Stack, StackValue, StackValueType, Tuple, TupleExt, load_slice_as_stack_value,
+    store_slice_as_stack_value,
 };
 use crate::state::VmState;
-use crate::util::{ensure_empty_slice, OwnedCellSlice, Uint4};
+use crate::util::{OwnedCellSlice, Uint4, ensure_empty_slice};
 
 /// Total state of VM.
 #[derive(Debug, Default, Clone)]

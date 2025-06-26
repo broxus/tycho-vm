@@ -1,10 +1,10 @@
 use std::rc::Rc;
 
 use arbitrary::{Arbitrary, Unstructured};
-use everscale_types::boc::BocRepr;
-use everscale_types::models::{BlockchainConfig, ExecutedComputePhase};
-use everscale_types::num::Tokens;
 use tycho_executor::{ExecutorParams, ParsedConfig};
+use tycho_types::boc::BocRepr;
+use tycho_types::models::{BlockchainConfig, ExecutedComputePhase};
+use tycho_types::num::Tokens;
 
 #[derive(Debug)]
 pub struct GasFees(pub Tokens);

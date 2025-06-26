@@ -1,16 +1,16 @@
 #![no_main]
 
 use arbitrary::{Arbitrary, Result, Unstructured};
-use everscale_types::boc::Boc;
-use everscale_types::cell::{Cell, CellFamily, HashBytes};
-use everscale_types::dict::Dict;
-use everscale_types::models::{
-    AccountState, AccountStatus, CurrencyCollection, ExtraCurrencyCollection, MsgInfo, StdAddr,
-};
-use everscale_types::num::{Tokens, VarUint248};
 use libfuzzer_sys::fuzz_target;
 use tycho_executor::phase::{ActionPhaseContext, ActionPhaseFull, ReceivedMessage};
 use tycho_executor::ExecutorState;
+use tycho_types::boc::Boc;
+use tycho_types::cell::{Cell, CellFamily, HashBytes};
+use tycho_types::dict::Dict;
+use tycho_types::models::{
+    AccountState, AccountStatus, CurrencyCollection, ExtraCurrencyCollection, MsgInfo, StdAddr,
+};
+use tycho_types::num::{Tokens, VarUint248};
 
 use self::common::{make_default_config, make_default_params, stub_compute_phase, GasFees};
 

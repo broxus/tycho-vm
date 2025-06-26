@@ -1,4 +1,4 @@
-use everscale_types::prelude::*;
+use tycho_types::prelude::*;
 use tycho_vm_proc::vm_module;
 
 #[cfg(feature = "dump")]

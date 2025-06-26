@@ -1,8 +1,8 @@
 use anyhow::Result;
-use everscale_types::models::CreditPhase;
+use tycho_types::models::CreditPhase;
 
-use crate::phase::receive::ReceivedMessage;
 use crate::ExecutorState;
+use crate::phase::receive::ReceivedMessage;
 
 impl ExecutorState<'_> {
     /// Credit phase of ordinary transactions.
@@ -36,9 +36,9 @@ impl ExecutorState<'_> {
 
 #[cfg(test)]
 mod tests {
-    use everscale_types::cell::Cell;
-    use everscale_types::models::CurrencyCollection;
-    use everscale_types::num::Tokens;
+    use tycho_types::cell::Cell;
+    use tycho_types::models::CurrencyCollection;
+    use tycho_types::num::Tokens;
 
     use super::*;
     use crate::tests::{make_default_config, make_default_params};

@@ -1,10 +1,10 @@
 use std::ops::Range;
 
-use everscale_crypto::ed25519;
-use everscale_types::cell::{CellBuilder, CellSlice};
-use everscale_types::error::Error;
 use num_bigint::{BigInt, Sign};
 use sha2::Digest;
+use tycho_crypto::ed25519;
+use tycho_types::cell::{CellBuilder, CellSlice};
+use tycho_types::error::Error;
 use tycho_vm_proc::vm_module;
 
 use crate::error::VmResult;
@@ -165,7 +165,7 @@ impl CryptOps {
                 break 'valid false;
             };
 
-            pubkey.verify(
+            pubkey.verify_tl(
                 ToSign {
                     signature_id: st.modifiers.signature_with_id.filter(|_| can_use_id),
                     data: &data[..data_len],
@@ -400,11 +400,11 @@ enum HashSource {
 
 #[cfg(test)]
 mod tests {
-    use everscale_crypto::ed25519;
-    use everscale_types::cell::{CellBuilder, HashBytes};
     use num_bigint::{BigInt, Sign};
     use sha2::Digest;
     use tracing_test::traced_test;
+    use tycho_crypto::ed25519;
+    use tycho_types::cell::{CellBuilder, HashBytes};
 
     use crate::saferc::SafeRc;
     use crate::stack::RcStackValue;

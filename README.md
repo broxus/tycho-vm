@@ -6,14 +6,6 @@ Rust implementation of the TON Virtual Machine and executor.
 > This crate tries to be as close to the original implementation as possible.
 > However, its main purpose is to be a core of [tycho](https://github.com/broxus/tycho), so there may be some differences.
 
-> [!NOTE]
-> This crate is still based on a WIP version of [`everscale-types`](https://github.com/broxus/everscale-types), so for now a `patch` section is required in the end-user `Cargo.toml`.
->
-> ```toml
-> [patch.crates-io]
-> everscale-types = { git = "https://github.com/broxus/everscale-types.git", rev = "245c7f05d7a737c8ebaad7224e7a8641f0b48f68" }
-> ```
-
 ## VM usage
 
 ```rust

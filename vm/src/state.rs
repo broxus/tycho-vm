@@ -1,10 +1,10 @@
 use anyhow::Result;
 use bitflags::bitflags;
-use everscale_types::cell::*;
-use everscale_types::error::Error;
 use num_bigint::BigInt;
 #[cfg(feature = "tracing")]
 use tracing::instrument;
+use tycho_types::cell::*;
+use tycho_types::error::Error;
 
 use crate::cont::{
     AgainCont, ArgContExt, ControlData, ControlRegs, ExcQuitCont, OrdCont, QuitCont, RcCont,

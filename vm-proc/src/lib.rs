@@ -1,9 +1,9 @@
 use std::collections::{BTreeMap, HashMap};
 
-use darling::util::{parse_expr, SpannedValue};
+use darling::util::{SpannedValue, parse_expr};
 use darling::{Error, FromMeta};
 use proc_macro::TokenStream;
-use quote::{quote, ToTokens};
+use quote::{ToTokens, quote};
 use syn::ItemImpl;
 
 #[derive(Debug, FromMeta)]
@@ -209,7 +209,7 @@ fn process_instr_definition(
             _ => {
                 return Err(
                     Error::custom("Invalid pattern for the opcode").with_span(&instr.code.span())
-                )
+                );
             }
         }
 

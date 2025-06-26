@@ -1,7 +1,7 @@
-use anyhow::{anyhow, Context};
-use everscale_types::models::{AccountStatus, ComputePhase, OrdinaryTxInfo};
-use everscale_types::num::Tokens;
-use everscale_types::prelude::*;
+use anyhow::{Context, anyhow};
+use tycho_types::models::{AccountStatus, ComputePhase, OrdinaryTxInfo};
+use tycho_types::num::Tokens;
+use tycho_types::prelude::*;
 
 use crate::error::{TxError, TxResult};
 use crate::phase::{
@@ -23,7 +23,7 @@ impl ExecutorState<'_> {
             Ok(_) => {
                 return Err(TxError::Fatal(anyhow!(
                     "received an unexpected inbound message"
-                )))
+                )));
             }
             // Invalid external messages can be safely skipped.
             Err(_) if is_external => return Err(TxError::Skipped),
@@ -158,18 +158,18 @@ impl ExecutorState<'_> {
 #[cfg(test)]
 mod tests {
     use anyhow::Result;
-    use everscale_asm_macros::tvmasm;
-    use everscale_types::cell::Lazy;
-    use everscale_types::models::{
+    use tycho_asm_macros::tvmasm;
+    use tycho_types::cell::Lazy;
+    use tycho_types::models::{
         Account, AccountState, AccountStatusChange, CurrencyCollection, ExtInMsgInfo, IntMsgInfo,
         MsgInfo, OptionalAccount, ShardAccount, StateInit, StdAddr, StorageInfo, StorageUsed,
         TxInfo,
     };
-    use everscale_types::num::VarUint56;
+    use tycho_types::num::VarUint56;
 
     use super::*;
-    use crate::tests::{make_default_config, make_default_params, make_message};
     use crate::Executor;
+    use crate::tests::{make_default_config, make_default_params, make_message};
 
     const STUB_ADDR: StdAddr = StdAddr::new(0, HashBytes::ZERO);
 

@@ -1,9 +1,9 @@
 use anyhow::Result;
-use everscale_types::models::{AccountState, AccountStatus, AccountStatusChange, StoragePhase};
-use everscale_types::num::Tokens;
+use tycho_types::models::{AccountState, AccountStatus, AccountStatusChange, StoragePhase};
+use tycho_types::num::Tokens;
 
-use crate::phase::receive::ReceivedMessage;
 use crate::ExecutorState;
+use crate::phase::receive::ReceivedMessage;
 
 /// Storage phase input context.
 pub struct StoragePhaseContext<'a> {
@@ -33,7 +33,7 @@ impl ExecutorState<'_> {
     /// not happen on networks with valid value flow.
     ///
     /// [`bounce_enabled`]: ReceivedMessage::bounce_enabled
-    /// [`last_paid`]: everscale_types::models::StorageInfo::last_paid
+    /// [`last_paid`]: tycho_types::models::StorageInfo::last_paid
     /// [`total_fees`]: Self::total_fees
     pub fn storage_phase(&mut self, ctx: StoragePhaseContext<'_>) -> Result<StoragePhase> {
         anyhow::ensure!(
@@ -161,14 +161,14 @@ impl ExecutorState<'_> {
 
 #[cfg(test)]
 mod tests {
-    use everscale_types::cell::HashBytes;
-    use everscale_types::models::{CurrencyCollection, StdAddr, StorageInfo, StorageUsed};
-    use everscale_types::num::VarUint56;
+    use tycho_types::cell::HashBytes;
+    use tycho_types::models::{CurrencyCollection, StdAddr, StorageInfo, StorageUsed};
+    use tycho_types::num::VarUint56;
 
     use super::*;
+    use crate::ParsedConfig;
     use crate::tests::{make_default_config, make_default_params};
     use crate::util::shift_ceil_price;
-    use crate::ParsedConfig;
 
     const STUB_ADDR: StdAddr = StdAddr::new(0, HashBytes::ZERO);
 

@@ -1,15 +1,15 @@
 use anyhow::Result;
-use everscale_types::cell::{Cell, CellBuilder, CellFamily, Lazy, Store};
-use everscale_types::models::{
+use tycho_types::cell::{Cell, CellBuilder, CellFamily, Lazy, Store};
+use tycho_types::models::{
     BouncePhase, ExecutedBouncePhase, MsgInfo, NoFundsBouncePhase, StorageUsedShort,
 };
-use everscale_types::num::Tokens;
+use tycho_types::num::Tokens;
 
+use crate::ExecutorState;
 use crate::phase::receive::ReceivedMessage;
 use crate::util::{
-    check_rewrite_dst_addr, new_varuint56_truncate, ExtStorageStat, StorageStatLimits,
+    ExtStorageStat, StorageStatLimits, check_rewrite_dst_addr, new_varuint56_truncate,
 };
-use crate::ExecutorState;
 
 /// Bounce phase input context.
 pub struct BouncePhaseContext<'a> {
@@ -206,8 +206,8 @@ impl ExecutorState<'_> {
 
 #[cfg(test)]
 mod tests {
-    use everscale_types::models::{IntMsgInfo, StdAddr};
-    use everscale_types::prelude::*;
+    use tycho_types::models::{IntMsgInfo, StdAddr};
+    use tycho_types::prelude::*;
 
     use super::*;
     use crate::tests::{make_default_config, make_default_params, make_message};

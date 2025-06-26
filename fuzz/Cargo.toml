@@ -2,7 +2,7 @@
 name = "tycho-vm-fuzz"
 version = "0.0.0"
 publish = false
-edition = "2021"
+edition.workspace = true
 
 [package.metadata]
 cargo-fuzz = true
@@ -30,7 +30,7 @@ bench = false
 
 [dependencies]
 arbitrary = { workspace = true, features = ["derive"] }
-everscale-types = { workspace = true, features = ["arbitrary", "base64"] }
 libfuzzer-sys = { workspace = true }
 tycho-executor = { path = "../executor" }
+tycho-types = { workspace = true, features = ["arbitrary", "base64"] }
 tycho-vm = { path = "../vm", features = ["arbitrary"] }

@@ -2,8 +2,8 @@ use std::mem::ManuallyDrop;
 use std::rc::Rc;
 use std::sync::Arc;
 
-use everscale_types::error::Error;
-use everscale_types::prelude::*;
+use tycho_types::error::Error;
+use tycho_types::prelude::*;
 
 // === SafeRc impl ===
 
@@ -137,8 +137,8 @@ impl<T: SafeDelete + ?Sized> Drop for SafeRc<T> {
         //     () as _v => {},
         //     crate::stack::NaN as _v => {},
         //     num_bigint::BigInt as _v => {},
-        //     everscale_types::cell::Cell as _v => {},
-        //     everscale_types::cell::CellBuilder as _v => {},
+        //     tycho_types::cell::Cell as _v => {},
+        //     tycho_types::cell::CellBuilder as _v => {},
         //     crate::util::OwnedCellSlice as _v => {},
         //     // Go through retire othersize (Cont, Stack, Tuple, etc.).
         //     value => {

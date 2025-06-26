@@ -10,9 +10,9 @@ pub enum TxError {
     Fatal(#[from] anyhow::Error),
 }
 
-impl From<everscale_types::error::Error> for TxError {
+impl From<tycho_types::error::Error> for TxError {
     #[inline]
-    fn from(value: everscale_types::error::Error) -> Self {
+    fn from(value: tycho_types::error::Error) -> Self {
         Self::Fatal(anyhow::Error::from(value))
     }
 }

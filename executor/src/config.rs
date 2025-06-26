@@ -1,12 +1,12 @@
 use ahash::{HashMap, HashSet};
 use anyhow::Result;
-use everscale_types::error::Error;
-use everscale_types::models::{
+use tycho_types::error::Error;
+use tycho_types::models::{
     BlockchainConfig, BlockchainConfigParams, BurningConfig, GasLimitsPrices, GlobalVersion,
     MsgForwardPrices, SizeLimitsConfig, StdAddr, StorageInfo, StoragePrices, WorkchainDescription,
 };
-use everscale_types::num::Tokens;
-use everscale_types::prelude::*;
+use tycho_types::num::Tokens;
+use tycho_types::prelude::*;
 use tycho_vm::{GasParams, UnpackedConfig};
 
 use crate::util::shift_ceil_price;

@@ -1,6 +1,6 @@
-use everscale_types::cell::HashBytes;
 use num_bigint::{BigInt, Sign};
 use sha2::Digest;
+use tycho_types::cell::HashBytes;
 use tycho_vm_proc::vm_module;
 
 use crate::cont::ControlRegs;

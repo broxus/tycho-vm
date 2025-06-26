@@ -1,10 +1,10 @@
 use anyhow::Result;
-use everscale_types::models::{CurrencyCollection, IntAddr, MsgInfo, StateInit};
-use everscale_types::num::Tokens;
-use everscale_types::prelude::*;
+use tycho_types::models::{CurrencyCollection, IntAddr, MsgInfo, StateInit};
+use tycho_types::num::Tokens;
+use tycho_types::prelude::*;
 
-use crate::util::{ExtStorageStat, StorageStatLimits};
 use crate::ExecutorState;
+use crate::util::{ExtStorageStat, StorageStatLimits};
 
 impl ExecutorState<'_> {
     /// "Pre" phase of ordinary transactions.
@@ -208,10 +208,8 @@ impl MsgStateInit {
 
 #[cfg(test)]
 mod tests {
-    use everscale_types::models::{
-        BurningConfig, ExtInMsgInfo, ExtOutMsgInfo, IntMsgInfo, StdAddr,
-    };
-    use everscale_types::num::Tokens;
+    use tycho_types::models::{BurningConfig, ExtInMsgInfo, ExtOutMsgInfo, IntMsgInfo, StdAddr};
+    use tycho_types::num::Tokens;
 
     use super::*;
     use crate::tests::{

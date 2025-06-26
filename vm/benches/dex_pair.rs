@@ -1,12 +1,12 @@
 use std::str::FromStr;
 
-use criterion::{black_box, criterion_group, criterion_main, Criterion};
-use everscale_types::models::{
+use criterion::{Criterion, criterion_group, criterion_main};
+use tycho_types::models::{
     AccountState, BlockchainConfig, CurrencyCollection, IntAddr, OptionalAccount, OwnedMessage,
     StdAddr,
 };
-use everscale_types::prelude::Boc;
-use tycho_vm::{tuple, GasParams, SmcInfoBase, VmState};
+use tycho_types::prelude::Boc;
+use tycho_vm::{GasParams, SmcInfoBase, VmState, tuple};
 
 fn vm_benchmark(c: &mut Criterion) {
     let message_cell = Boc::decode_base64("te6ccgECCgEAAdIAAbFIABbVmx+wnv8fS4+kTo8s1hEqmz8ZYjetoq95FUaLoFUhAAYExf4R2cGqdkxcoEzu/tW7WoYIYw/JDYAoA3HUPkxIUgt0A/wGL1+0AABky2zFLKjOex56wAEBa3DYn8mAFJOanCsVNCqqvMSOs8XJzs2kTAFvABsSPI3yUj4IlSegAAAAAAAAAAAAAAF0h26AEAIBQ4AcNkp9Jc1uMtawP3MzjPaDNfYRgoLDQpJ8RktziPDpwnADAUOAFjbz5aaxiGlDuV/FUC4FtnTzjkE4CIRE2PMqoo1nCA5wBAFDgBGIQaezWj3ozIlBQpKABWzPoIuwq/YS9RDvT1OchiNQcAUEtwYAAAAATRHHbgAAAAAAAAAAAAAAAAX14QCAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACCQgHBgAyAQAAAABNEcduAAAAAAAAAAAAAAAABfXhAAAyAAAAAABNEcduAAAAAAAAAAAAAAAABfXhAABjAAAAAAAAAAAAAAAH2QkY34AcuyyX7tchRTlCP+B0CAXdlNQ480H2mxReDUz3wKb01/AAAA==").unwrap();
@@ -55,7 +55,7 @@ fn vm_benchmark(c: &mut Criterion) {
                 .build();
 
             let result = vm_state.run();
-            _ = black_box(result);
+            _ = std::hint::black_box(result);
         });
     });
 }

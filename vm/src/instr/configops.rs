@@ -1,20 +1,20 @@
 use std::fmt::Formatter;
 
-use everscale_types::cell::{CellTreeStats, LoadMode};
-use everscale_types::dict;
-use everscale_types::models::{GasLimitsPrices, MsgForwardPrices, StoragePrices};
-use everscale_types::prelude::*;
 use num_bigint::Sign;
+use tycho_types::cell::{CellTreeStats, LoadMode};
+use tycho_types::dict;
+use tycho_types::models::{GasLimitsPrices, MsgForwardPrices, StoragePrices};
+use tycho_types::prelude::*;
 use tycho_vm_proc::vm_module;
 
 use crate::cont::ControlRegs;
 use crate::error::VmResult;
 use crate::gas::GasConsumer;
 use crate::saferc::SafeRc;
-use crate::smc_info::{SmcInfoBase, SmcInfoTonV11, SmcInfoTonV4, SmcInfoTonV6};
+use crate::smc_info::{SmcInfoBase, SmcInfoTonV4, SmcInfoTonV6, SmcInfoTonV11};
 use crate::stack::{RcStackValue, Stack, TupleExt};
 use crate::state::VmState;
-use crate::util::{shift_ceil_price, OwnedCellSlice};
+use crate::util::{OwnedCellSlice, shift_ceil_price};
 
 pub struct ConfigOps;
 
@@ -457,10 +457,10 @@ const CONFIG_KEY_BITS: u16 = 32;
 
 #[cfg(test)]
 mod test {
-    use everscale_types::models::{CurrencyCollection, ExtraCurrencyCollection, IntAddr};
-    use everscale_types::num::{Tokens, VarUint248};
-    use everscale_types::prelude::*;
     use tracing_test::traced_test;
+    use tycho_types::models::{CurrencyCollection, ExtraCurrencyCollection, IntAddr};
+    use tycho_types::num::{Tokens, VarUint248};
+    use tycho_types::prelude::*;
     use tycho_vm::smc_info::SmcInfoTonV11;
 
     use crate::{OwnedCellSlice, RcStackValue, SafeRc, SmcInfoBase, Stack, VmState};
@@ -566,7 +566,9 @@ mod test {
             OwnedCellSlice::from((addr_slice.range(), msg))
         };
 
-        let state_init = Boc::decode_base64("te6ccgECHwEAAusAAgE0BwEBAcACAgPPoAQDAENIAJ6f+HWW+qtokWFlE2WdLD8aATPceZK4qWHZeqfEJ7rnAgEgBgUAQyAFJOanCsVNCqqvMSOs8XJzs2kTAFvABsSPI3yUj4IlSewAQQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAIAIGits1HggEJIrtUyDjAyDA/+MCIMD+4wLyCxoLCgkAAAOK7UTQ10nDAfhmifhpIds80wABn4ECANcYIPkBWPhC+RDyqN7TPwH4QyG58rQg+COBA+iogggbd0CgufK0+GPTHwHbPPI8GBQMA1LtRNDXScMB+GYi0NMD+kAw+GmpOADcIccA4wIh1w0f8rwh4wMB2zzyPBkZDAEUIIIQFaA4+7rjAg0EkDD4Qm7jAPhG8nMhltTTH9TR0JPU0x/i+kDU0dD6QNH4SfhKxwUgjoDfjoCOFCDIz4UIzoBvz0DJgQCApiC1B/sA4l8E2zzyABQRDh0BCF0i2zwPAnz4SsjO+EsBznABy39wAcsfEssfzvhBiMjPjits1szOyQHMIfsEAdAgizits1jHBZPXTdDe10zQ7R7tU8nbPB4QAATwAgEeMCH6Qm8T1wv/wwAgjoDeEgEQMCHbPPhJxwUTAX5wyMv/cG2AQPRD+EpxWIBA9BYBcliAQPQWyPQAyfhBiMjPjits1szOycjPhID0APQAz4HJ+QDIz4oAQMv/ydAeAhbtRNDXScIBjoDjDRYVADTtRNDT/9M/0wAx+kDU0dD6QNH4a/hq+GP4YgJUcO1E0PQFcSGAQPQOjoDfciKAQPQOjoDf+Gv4aoBA9A7yvdcL//hicPhjFxcBAokYAEOAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAQAAr4RvLgTAIK9KQg9KEcGwAUc29sIDAuNTcuMQEYoAAAAAIw2zz4D/IAHQAs+Er4Q/hCyMv/yz/Pg874S8jOzcntVAAMIPhh7R7Z")?;
+        let state_init = Boc::decode_base64(
+            "te6ccgECHwEAAusAAgE0BwEBAcACAgPPoAQDAENIAJ6f+HWW+qtokWFlE2WdLD8aATPceZK4qWHZeqfEJ7rnAgEgBgUAQyAFJOanCsVNCqqvMSOs8XJzs2kTAFvABsSPI3yUj4IlSewAQQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAIAIGits1HggEJIrtUyDjAyDA/+MCIMD+4wLyCxoLCgkAAAOK7UTQ10nDAfhmifhpIds80wABn4ECANcYIPkBWPhC+RDyqN7TPwH4QyG58rQg+COBA+iogggbd0CgufK0+GPTHwHbPPI8GBQMA1LtRNDXScMB+GYi0NMD+kAw+GmpOADcIccA4wIh1w0f8rwh4wMB2zzyPBkZDAEUIIIQFaA4+7rjAg0EkDD4Qm7jAPhG8nMhltTTH9TR0JPU0x/i+kDU0dD6QNH4SfhKxwUgjoDfjoCOFCDIz4UIzoBvz0DJgQCApiC1B/sA4l8E2zzyABQRDh0BCF0i2zwPAnz4SsjO+EsBznABy39wAcsfEssfzvhBiMjPjits1szOyQHMIfsEAdAgizits1jHBZPXTdDe10zQ7R7tU8nbPB4QAATwAgEeMCH6Qm8T1wv/wwAgjoDeEgEQMCHbPPhJxwUTAX5wyMv/cG2AQPRD+EpxWIBA9BYBcliAQPQWyPQAyfhBiMjPjits1szOycjPhID0APQAz4HJ+QDIz4oAQMv/ydAeAhbtRNDXScIBjoDjDRYVADTtRNDT/9M/0wAx+kDU0dD6QNH4a/hq+GP4YgJUcO1E0PQFcSGAQPQOjoDfciKAQPQOjoDf+Gv4aoBA9A7yvdcL//hicPhjFxcBAokYAEOAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAQAAr4RvLgTAIK9KQg9KEcGwAUc29sIDAuNTcuMQEYoAAAAAIw2zz4D/IAHQAs+Er4Q/hCyMv/yz/Pg874S8jOzcntVAAMIPhh7R7Z",
+        )?;
 
         assert_run_vm!("INMSGPARAMS", c7: c7.clone(), [] => [raw t2.clone()]);
         assert_run_vm!("INMSG_BOUNCE", c7: c7.clone(), [] => [int -1]);

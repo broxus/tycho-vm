@@ -1,10 +1,10 @@
 use std::borrow::Cow;
 
-use everscale_types::cell::LoadMode;
-use everscale_types::error::Error;
-use everscale_types::prelude::*;
 use num_bigint::{BigInt, Sign};
 use num_traits::ToPrimitive;
+use tycho_types::cell::LoadMode;
+use tycho_types::error::Error;
+use tycho_types::prelude::*;
 use tycho_vm_proc::vm_module;
 
 use crate::cont::OrdCont;
@@ -18,7 +18,7 @@ use crate::stack::{Stack, StackValue};
 use crate::state::VmState;
 #[cfg(any(feature = "dump", feature = "tracing"))]
 use crate::util::CellSliceExt;
-use crate::util::{remove_trailing, OwnedCellSlice};
+use crate::util::{OwnedCellSlice, remove_trailing};
 
 pub struct CellOps;
 
@@ -1497,7 +1497,7 @@ fn exec_push_ref_common(
     debug_assert!(ok);
 
     let Some(cell) = st.code.cell().reference_cloned(code_range.offset_refs()) else {
-        vm_bail!(CellError(everscale_types::error::Error::CellUnderflow));
+        vm_bail!(CellError(tycho_types::error::Error::CellUnderflow));
     };
     let ok = st.code.range_mut().skip_first(0, 1).is_ok();
     debug_assert!(ok);
@@ -2073,11 +2073,11 @@ fn exec_cell_level_op_common(stack: &mut Stack, level: u8, op: LevelOp) -> VmRes
 mod tests {
     use std::collections::HashMap;
 
-    use everscale_types::boc::Boc;
-    use everscale_types::cell::{CellBuilder, CellType};
-    use everscale_types::merkle::{MerkleProof, MerkleUpdate};
-    use everscale_types::models::SimpleLib;
     use tracing_test::traced_test;
+    use tycho_types::boc::Boc;
+    use tycho_types::cell::{CellBuilder, CellType};
+    use tycho_types::merkle::{MerkleProof, MerkleUpdate};
+    use tycho_types::models::SimpleLib;
 
     use super::*;
 
@@ -2710,7 +2710,7 @@ mod tests {
         assert_run_vm!("XLOADQ", [cell cell.clone()] => [cell cell.clone(), int -1]);
 
         // Pruned branch
-        let pruned_branch = everscale_types::merkle::make_pruned_branch(
+        let pruned_branch = tycho_types::merkle::make_pruned_branch(
             Cell::empty_cell_ref(),
             0,
             Cell::empty_context(),

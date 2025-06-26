@@ -1,8 +1,8 @@
-use everscale_types::cell::LoadMode;
-use everscale_types::error::Error;
-use everscale_types::num::SplitDepth;
-use everscale_types::prelude::*;
 use num_bigint::{BigInt, Sign};
+use tycho_types::cell::LoadMode;
+use tycho_types::error::Error;
+use tycho_types::num::SplitDepth;
+use tycho_types::prelude::*;
 use tycho_vm_proc::vm_module;
 
 use crate::error::VmResult;
@@ -11,7 +11,7 @@ use crate::saferc::SafeRc;
 use crate::smc_info::VmVersion;
 use crate::stack::{RcStackValue, Stack, StackValue, Tuple};
 use crate::state::VmState;
-use crate::util::{load_uint_leq, OwnedCellSlice};
+use crate::util::{OwnedCellSlice, load_uint_leq};
 
 pub struct CurrencyOps;
 
@@ -393,8 +393,8 @@ fn skip_maybe_anycast(cs: &mut CellSlice, version: &VmVersion) -> Result<(), Err
 
 #[cfg(test)]
 mod test {
-    use everscale_types::models::{Anycast, StdAddr};
     use tracing_test::traced_test;
+    use tycho_types::models::{Anycast, StdAddr};
 
     use super::*;
 

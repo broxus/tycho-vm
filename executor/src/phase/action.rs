@@ -1,19 +1,19 @@
 use anyhow::Result;
-use everscale_types::cell::{CellTreeStats, Lazy};
-use everscale_types::error::Error;
-use everscale_types::models::{
+use tycho_types::cell::{CellTreeStats, Lazy};
+use tycho_types::error::Error;
+use tycho_types::models::{
     AccountState, AccountStatus, AccountStatusChange, ActionPhase, ChangeLibraryMode,
     CurrencyCollection, ExecutedComputePhase, ExtraCurrencyCollection, LibRef, OutAction,
     OwnedMessage, OwnedRelaxedMessage, RelaxedMsgInfo, ReserveCurrencyFlags, SendMsgFlags,
     SimpleLib, StateInit, StorageUsedShort,
 };
-use everscale_types::num::{Tokens, VarUint56};
-use everscale_types::prelude::*;
+use tycho_types::num::{Tokens, VarUint56};
+use tycho_types::prelude::*;
 
 use crate::phase::receive::ReceivedMessage;
 use crate::util::{
-    check_rewrite_dst_addr, check_rewrite_src_addr, check_state_limits, check_state_limits_diff,
-    ExtStorageStat, StateLimitsResult, StorageStatLimits,
+    ExtStorageStat, StateLimitsResult, StorageStatLimits, check_rewrite_dst_addr,
+    check_rewrite_src_addr, check_state_limits, check_state_limits_diff,
 };
 use crate::{ExecutorInspector, ExecutorState, PublicLibraryChange};
 
@@ -509,7 +509,7 @@ impl ExecutorState<'_> {
                             new_funds.try_sub_assign(ctx.compute_phase.gas_fees)?;
                             new_funds.try_sub_assign(*ctx.action_fine)?;
 
-                            Ok::<_, everscale_types::error::Error>(())
+                            Ok::<_, tycho_types::error::Error>(())
                         })()
                         .is_err()
                     {
@@ -1220,17 +1220,17 @@ const MAX_MSG_EXTRA_CURRENCIES: usize = 2;
 mod tests {
     use std::collections::BTreeMap;
 
-    use everscale_asm_macros::tvmasm;
-    use everscale_types::merkle::MerkleProof;
-    use everscale_types::models::{
+    use tycho_asm_macros::tvmasm;
+    use tycho_types::merkle::MerkleProof;
+    use tycho_types::models::{
         Anycast, IntAddr, MessageLayout, MsgInfo, RelaxedIntMsgInfo, RelaxedMessage, StdAddr,
         VarAddr,
     };
-    use everscale_types::num::{Uint9, VarUint248};
+    use tycho_types::num::{Uint9, VarUint248};
 
     use super::*;
-    use crate::tests::{make_default_config, make_default_params};
     use crate::ExecutorParams;
+    use crate::tests::{make_default_config, make_default_params};
 
     const STUB_ADDR: StdAddr = StdAddr::new(0, HashBytes::ZERO);
     const OK_BALANCE: Tokens = Tokens::new(1_000_000_000);

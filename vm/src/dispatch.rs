@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 
 use anyhow::Result;
-use everscale_types::prelude::*;
+use tycho_types::prelude::*;
 
 use crate::error::VmResult;
 #[cfg(feature = "dump")]

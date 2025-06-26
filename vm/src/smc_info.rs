@@ -1,14 +1,14 @@
 use std::rc::Rc;
 use std::sync::Arc;
 
-use everscale_types::error::Error;
-use everscale_types::models::{
-    BlockchainConfigParams, CurrencyCollection, IntAddr, IntMsgInfo, MsgType, StateInit,
-};
-use everscale_types::num::Tokens;
-use everscale_types::prelude::*;
 use num_bigint::{BigInt, Sign};
 use sha2::Digest;
+use tycho_types::error::Error;
+use tycho_types::models::{
+    BlockchainConfigParams, CurrencyCollection, IntAddr, IntMsgInfo, MsgType, StateInit,
+};
+use tycho_types::num::Tokens;
+use tycho_types::prelude::*;
 
 use crate::error::VmResult;
 use crate::saferc::{SafeDelete, SafeRc};

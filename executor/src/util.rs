@@ -1,13 +1,13 @@
 use std::mem::ManuallyDrop;
 
 use ahash::HashMap;
-use everscale_types::cell::CellTreeStats;
-use everscale_types::models::{
+use tycho_types::cell::CellTreeStats;
+use tycho_types::models::{
     IntAddr, ShardIdent, SimpleLib, SizeLimitsConfig, StateInit, StdAddr, WorkchainDescription,
     WorkchainFormat,
 };
-use everscale_types::num::{VarUint24, VarUint56};
-use everscale_types::prelude::*;
+use tycho_types::num::{VarUint24, VarUint56};
+use tycho_types::prelude::*;
 
 /// Brings [unlikely](core::intrinsics::unlikely) to stable rust.
 #[inline(always)]

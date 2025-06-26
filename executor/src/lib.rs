@@ -1,14 +1,14 @@
 use anyhow::{Context, Result};
-use everscale_types::cell::Lazy;
-use everscale_types::dict;
-use everscale_types::error::Error;
-use everscale_types::models::{
+use tycho_types::cell::Lazy;
+use tycho_types::dict;
+use tycho_types::error::Error;
+use tycho_types::models::{
     Account, AccountState, AccountStatus, CurrencyCollection, HashUpdate, IntAddr, LibDescr,
     Message, OwnedMessage, ShardAccount, SimpleLib, StdAddr, StorageInfo, StorageUsed, TickTock,
     Transaction, TxInfo,
 };
-use everscale_types::num::{Tokens, Uint15};
-use everscale_types::prelude::*;
+use tycho_types::num::{Tokens, Uint15};
+use tycho_types::prelude::*;
 
 pub use self::config::ParsedConfig;
 pub use self::error::{TxError, TxResult};
@@ -316,7 +316,7 @@ impl<'a> ExecutorState<'a> {
         data: Cell,
         code_boc: impl AsRef<[u8]>,
     ) -> Self {
-        use everscale_types::models::StateInit;
+        use tycho_types::models::StateInit;
 
         let mut res = Self::new_non_existent(params, config, address);
         res.balance = balance.into();
@@ -349,7 +349,7 @@ pub struct ExecutorParams {
     /// Prevent [`Frozen`] accounts from being deleted
     /// when their storage due is too high.
     ///
-    /// [`Frozen`]: everscale_types::models::AccountState::Frozen
+    /// [`Frozen`]: tycho_types::models::AccountState::Frozen
     pub disable_delete_frozen_accounts: bool,
     /// Charge account balance for additional `total_action_fees`
     /// when action phase fails.
@@ -741,8 +741,8 @@ fn build_out_msgs(out_msgs: &[Lazy<OwnedMessage>]) -> Result<Dict<Uint15, Cell>,
 mod tests {
     use std::rc::Rc;
 
-    use everscale_types::boc::BocRepr;
-    use everscale_types::models::{BlockchainConfig, MsgInfo, StateInit};
+    use tycho_types::boc::BocRepr;
+    use tycho_types::models::{BlockchainConfig, MsgInfo, StateInit};
 
     use super::*;
 

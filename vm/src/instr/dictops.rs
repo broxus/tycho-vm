@@ -1,7 +1,7 @@
-use everscale_types::dict::{self, DictBound, SetMode};
-use everscale_types::error::Error;
-use everscale_types::prelude::*;
 use num_bigint::Sign;
+use tycho_types::dict::{self, DictBound, SetMode};
+use tycho_types::error::Error;
+use tycho_types::prelude::*;
 use tycho_vm_proc::vm_module;
 
 use crate::cont::OrdCont;
@@ -741,11 +741,7 @@ struct DisplayDictOpArgs<const B: bool> {
 impl<const B: bool> std::fmt::Display for DisplayDictOpArgs<B> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let int = if self.args.is_int() {
-            if self.args.is_unsigned() {
-                "U"
-            } else {
-                "I"
-            }
+            if self.args.is_unsigned() { "U" } else { "I" }
         } else {
             ""
         };
@@ -791,11 +787,7 @@ struct DisplayShortDictOpArgs {
 impl std::fmt::Display for DisplayShortDictOpArgs {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let int = if self.args.is_int() {
-            if self.args.is_unsigned() {
-                "U"
-            } else {
-                "I"
-            }
+            if self.args.is_unsigned() { "U" } else { "I" }
         } else {
             ""
         };
@@ -832,11 +824,7 @@ impl DictGetNearArgs {
 impl std::fmt::Display for DictGetNearArgs {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let int = if self.is_int() {
-            if self.is_unsigned() {
-                "U"
-            } else {
-                "I"
-            }
+            if self.is_unsigned() { "U" } else { "I" }
         } else {
             ""
         };
@@ -938,8 +926,8 @@ fn to_value_ref(mut cs: CellSlice<'_>) -> VmResult<RcStackValue> {
 
 #[cfg(test)]
 pub mod tests {
-    use everscale_types::cell::Lazy;
     use tracing_test::traced_test;
+    use tycho_types::cell::Lazy;
 
     use self::dict::{Dict, DictKey};
     use super::*;
@@ -1286,13 +1274,13 @@ pub mod tests {
     //     let binding = slice.clone();
     //     let mut cloned = binding.apply().unwrap();
 
-    //     let mut dict2 = everscale_types::dict::Dict::<i32, i32>::new();
+    //     let mut dict2 = tycho_types::dict::Dict::<i32, i32>::new();
     //     dict2.set(x, 32).unwrap();
     //     dict2.set(y, 1).unwrap();
     //     dict2.set(z, 2).unwrap();
     //     dict2.set(v, 33).unwrap();
 
-    //     let subdict = everscale_types::dict::dict_get_subdict(
+    //     let subdict = tycho_types::dict::dict_get_subdict(
     //         dict2.into_root().as_ref(),
     //         32,
     //         &mut cloned,

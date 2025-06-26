@@ -1,4 +1,4 @@
-use everscale_types::prelude::*;
+use tycho_types::prelude::*;
 use tycho_vm_proc::vm_module;
 
 use crate::cont::{ArgContExt, ControlData, ControlRegs, OrdCont, PushIntCont, RcCont};
@@ -11,7 +11,7 @@ use crate::gas::{GasConsumer, GasConsumerDeriveParams};
 use crate::instr::codepage0;
 use crate::saferc::SafeRc;
 use crate::stack::{Stack, StackValueType};
-use crate::state::{ParentVmState, SaveCr, VmState, EXC_QUIT, QUIT0, QUIT1, QUIT11};
+use crate::state::{EXC_QUIT, ParentVmState, QUIT0, QUIT1, QUIT11, SaveCr, VmState};
 
 pub struct ContOps;
 
@@ -450,13 +450,13 @@ impl ContOps {
             debug_assert!(ok);
 
             let Some(cell1) = code.cell().reference_cloned(code.range().offset_refs()) else {
-                vm_bail!(CellError(everscale_types::error::Error::CellUnderflow));
+                vm_bail!(CellError(tycho_types::error::Error::CellUnderflow));
             };
             let ok = code.range_mut().skip_first(0, 1).is_ok();
             debug_assert!(ok);
 
             let Some(cell0) = code.cell().reference_cloned(code.range().offset_refs()) else {
-                vm_bail!(CellError(everscale_types::error::Error::CellUnderflow));
+                vm_bail!(CellError(tycho_types::error::Error::CellUnderflow));
             };
             let ok = code.range_mut().skip_first(0, 1).is_ok();
             debug_assert!(ok);
@@ -512,11 +512,7 @@ impl ContOps {
             (cont, bit)
         };
 
-        if bit ^ n {
-            st.jump(cont)
-        } else {
-            Ok(0)
-        }
+        if bit ^ n { st.jump(cont) } else { Ok(0) }
     }
 
     #[op_ext(code = 0xe3c0 >> 6, code_bits = 10, arg_bits = 0, dump_with = dump_if_bit_jmpref)]
@@ -527,7 +523,7 @@ impl ContOps {
         debug_assert!(ok);
 
         let Some(cell) = st.code.cell().reference_cloned(code_range.offset_refs()) else {
-            vm_bail!(CellError(everscale_types::error::Error::CellUnderflow));
+            vm_bail!(CellError(tycho_types::error::Error::CellUnderflow));
         };
         let ok = st.code.range_mut().skip_first(0, 1).is_ok();
         debug_assert!(ok);
@@ -1171,7 +1167,7 @@ fn exec_ref_prefix(st: &mut VmState, bits: u16, name: &str) -> VmResult<RcCont> 
     debug_assert!(ok);
 
     let Some(code) = st.code.cell().reference_cloned(code_range.offset_refs()) else {
-        vm_bail!(CellError(everscale_types::error::Error::CellUnderflow));
+        vm_bail!(CellError(tycho_types::error::Error::CellUnderflow));
     };
     let ok = st.code.range_mut().skip_first(0, 1).is_ok();
     debug_assert!(ok);
@@ -1204,7 +1200,7 @@ fn exec_cell_prefix(st: &mut VmState, bits: u16, name: &str) -> VmResult<Cell> {
     debug_assert!(ok);
 
     let Some(cell) = st.code.cell().reference_cloned(code_range.offset_refs()) else {
-        vm_bail!(CellError(everscale_types::error::Error::CellUnderflow));
+        vm_bail!(CellError(tycho_types::error::Error::CellUnderflow));
     };
     let ok = st.code.range_mut().skip_first(0, 1).is_ok();
     debug_assert!(ok);
@@ -1221,7 +1217,7 @@ fn exec_ifelse_ref_impl(st: &mut VmState, bits: u16, ref_first: bool) -> VmResul
         debug_assert!(ok);
 
         let Some(cell) = st.code.cell().reference_cloned(code_range.offset_refs()) else {
-            vm_bail!(CellError(everscale_types::error::Error::CellUnderflow));
+            vm_bail!(CellError(tycho_types::error::Error::CellUnderflow));
         };
         let ok = st.code.range_mut().skip_first(0, 1).is_ok();
         debug_assert!(ok);
@@ -1406,11 +1402,7 @@ impl std::fmt::Display for ThrowAnyArgs {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let arg = if self.has_param() { "ARG" } else { "" };
         let cond = if self.has_cond() {
-            if self.throw_cond() {
-                "IF"
-            } else {
-                "IFNOT"
-            }
+            if self.throw_cond() { "IF" } else { "IFNOT" }
         } else {
             ""
         };
@@ -1582,15 +1574,15 @@ fn exec_runvm_common(st: &mut VmState, args: RunVmArgs) -> VmResult<i32> {
 
 #[cfg(test)]
 mod tests {
-    use everscale_types::boc::Boc;
     use num_bigint::BigInt;
     use tracing_test::traced_test;
+    use tycho_types::boc::Boc;
 
     use super::*;
+    use crate::OwnedCellSlice;
     use crate::cont::QuitCont;
     use crate::instr::codepage0;
     use crate::state::IntoCode;
-    use crate::OwnedCellSlice;
 
     #[test]
     #[traced_test]

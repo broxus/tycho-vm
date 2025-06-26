@@ -1,15 +1,15 @@
 use std::mem::ManuallyDrop;
 use std::rc::Rc;
 
-use everscale_types::error::Error;
-use everscale_types::prelude::*;
 use num_bigint::BigInt;
 use num_traits::{One, ToPrimitive, Zero};
+use tycho_types::error::Error;
+use tycho_types::prelude::*;
 
-use crate::cont::{load_cont, Cont, RcCont};
+use crate::cont::{Cont, RcCont, load_cont};
 use crate::error::{VmError, VmResult};
 use crate::saferc::{SafeDelete, SafeRc, SafeRcMakeMut};
-use crate::util::{ensure_empty_slice, OwnedCellSlice};
+use crate::util::{OwnedCellSlice, ensure_empty_slice};
 
 /// A stack of values.
 #[derive(Debug, Default, Clone)]

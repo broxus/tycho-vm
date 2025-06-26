@@ -1,10 +1,10 @@
 use std::cmp::Ordering;
 
-#[cfg(feature = "dump")]
-use everscale_types::prelude::*;
 use num_bigint::{BigInt, Sign};
 use num_integer::Integer;
 use num_traits::Zero;
+#[cfg(feature = "dump")]
+use tycho_types::prelude::*;
 use tycho_vm_proc::vm_module;
 
 #[cfg(feature = "dump")]

@@ -3,9 +3,9 @@ use std::fmt::Write;
 
 use ahash::HashMap;
 use anyhow::Result;
-use everscale_types::prelude::*;
 use num_bigint::BigInt;
 use smol_str::SmolStr;
+use tycho_types::prelude::*;
 use tycho_vm::{DumpError, DumpOutput, DumpResult};
 
 pub use self::models::{
@@ -228,7 +228,7 @@ struct Resources {
 
 impl Resources {
     fn tokenize(&self, text: &str, links: &[ItemId]) -> Result<(SmolStr, Vec<OpcodeArg>)> {
-        use self::tokenizer::{tokenize, OpcodeArgToken, OpcodeTokens};
+        use self::tokenizer::{OpcodeArgToken, OpcodeTokens, tokenize};
 
         let OpcodeTokens { name, args } = tokenize(text)?;
 
@@ -354,7 +354,7 @@ impl Resources {
                 // Parse jump table items into inline continuations.
                 let mut to_parse = Vec::new();
                 if (|| {
-                    for item in everscale_types::dict::RawOwnedIter::new(&Some(root), n) {
+                    for item in tycho_types::dict::RawOwnedIter::new(&Some(root), n) {
                         let (key, value) = item?;
                         let key = key.as_data_slice().load_bigint(n, true)?;
 
@@ -368,7 +368,7 @@ impl Resources {
                         });
                         to_parse.push(DumpStackItem::new(id, value, true, Some(save_to)));
                     }
-                    Ok::<_, everscale_types::error::Error>(())
+                    Ok::<_, tycho_types::error::Error>(())
                 })()
                 .is_ok()
                 {
@@ -526,13 +526,15 @@ impl DumpOutput for DumpState {
 #[cfg(test)]
 mod tests {
     use anyhow::Result;
-    use everscale_asm_macros::tvmasm;
+    use tycho_asm_macros::tvmasm;
 
     use super::*;
 
     #[test]
     fn disasm_ever_wallet() -> Result<()> {
-        let code = Boc::decode_base64("te6ccgEBBgEA/AABFP8A9KQT9LzyyAsBAgEgBQIC5vJx1wEBwADyeoMI1xjtRNCDB9cB1ws/yPgozxYjzxbJ+QADcdcBAcMAmoMH1wFRE7ry4GTegEDXAYAg1wGAINcBVBZ1+RDyqPgju/J5Zr74I4EHCKCBA+ioUiC8sfJ0AiCCEEzuZGy64w8ByMv/yz/J7VQEAwA+ghAWnj4Ruo4R+AACkyDXSpd41wHUAvsA6NGTMvI84gCYMALXTND6QIMG1wFx1wF41wHXTPgAcIAQBKoCFLHIywVQBc8WUAP6AstpItAhzzEh10mghAm5mDNwAcsAWM8WlzBxAcsAEsziyQH7AAAE0jA=")?;
+        let code = Boc::decode_base64(
+            "te6ccgEBBgEA/AABFP8A9KQT9LzyyAsBAgEgBQIC5vJx1wEBwADyeoMI1xjtRNCDB9cB1ws/yPgozxYjzxbJ+QADcdcBAcMAmoMH1wFRE7ry4GTegEDXAYAg1wGAINcBVBZ1+RDyqPgju/J5Zr74I4EHCKCBA+ioUiC8sfJ0AiCCEEzuZGy64w8ByMv/yz/J7VQEAwA+ghAWnj4Ruo4R+AACkyDXSpd41wHUAvsA6NGTMvI84gCYMALXTND6QIMG1wFx1wF41wHXTPgAcIAQBKoCFLHIywVQBc8WUAP6AstpItAhzzEh10mghAm5mDNwAcsAWM8WlzBxAcsAEsziyQH7AAAE0jA=",
+        )?;
         let code = disasm_structured(code)?;
         println!("{}", serde_json::to_string_pretty(&code).unwrap());
 
@@ -547,7 +549,9 @@ mod tests {
 
     #[test]
     fn disasm_wallet_v3() -> Result<()> {
-        let code = Boc::decode_base64("te6ccgEBAQEAcQAA3v8AIN0gggFMl7ohggEznLqxn3Gw7UTQ0x/THzHXC//jBOCk8mCDCNcYINMf0x/TH/gjE7vyY+1E0NMf0x/T/9FRMrryoVFEuvKiBPkBVBBV+RDyo/gAkyDXSpbTB9QC+wDo0QGkyMsfyx/L/8ntVA==")?;
+        let code = Boc::decode_base64(
+            "te6ccgEBAQEAcQAA3v8AIN0gggFMl7ohggEznLqxn3Gw7UTQ0x/THzHXC//jBOCk8mCDCNcYINMf0x/TH/gjE7vyY+1E0NMf0x/T/9FRMrryoVFEuvKiBPkBVBBV+RDyo/gAkyDXSpbTB9QC+wDo0QGkyMsfyx/L/8ntVA==",
+        )?;
         let code = disasm_structured(code)?;
         println!("{}", serde_json::to_string_pretty(&code).unwrap());
 

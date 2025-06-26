@@ -1,5 +1,5 @@
 use anyhow::Context;
-use everscale_types::models::{AccountStatus, ComputePhase, TickTock, TickTockTxInfo};
+use tycho_types::models::{AccountStatus, ComputePhase, TickTock, TickTockTxInfo};
 
 use crate::error::{TxError, TxResult};
 use crate::phase::{

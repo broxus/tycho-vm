@@ -1,7 +1,7 @@
 #![no_main]
 
-use everscale_types::arbitrary::OrdinaryCell;
 use libfuzzer_sys::fuzz_target;
+use tycho_types::arbitrary::OrdinaryCell;
 use tycho_vm::{CustomSmcInfo, GasParams, SafeRc, VmState};
 
 fuzz_target!(|code: OrdinaryCell| {

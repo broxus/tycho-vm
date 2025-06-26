@@ -1,7 +1,7 @@
-use criterion::{black_box, criterion_group, criterion_main, Criterion};
-use everscale_types::boc::Boc;
-use everscale_types::models::{CurrencyCollection, IntAddr, OwnedMessage};
-use tycho_vm::{tuple, GasParams, SmcInfoBase, VmState};
+use criterion::{Criterion, criterion_group, criterion_main};
+use tycho_types::boc::Boc;
+use tycho_types::models::{CurrencyCollection, IntAddr, OwnedMessage};
+use tycho_vm::{GasParams, SmcInfoBase, VmState, tuple};
 
 fn vm_benchmark(c: &mut Criterion) {
     let code = Boc::decode_base64("te6cckEBBgEA/AABFP8A9KQT9LzyyAsBAgEgAgMABNIwAubycdcBAcAA8nqDCNcY7UTQgwfXAdcLP8j4KM8WI88WyfkAA3HXAQHDAJqDB9cBURO68uBk3oBA1wGAINcBgCDXAVQWdfkQ8qj4I7vyeWa++COBBwiggQPoqFIgvLHydAIgghBM7mRsuuMPAcjL/8s/ye1UBAUAmDAC10zQ+kCDBtcBcdcBeNcB10z4AHCAEASqAhSxyMsFUAXPFlAD+gLLaSLQIc8xIddJoIQJuZgzcAHLAFjPFpcwcQHLABLM4skB+wAAPoIQFp4+EbqOEfgAApMg10qXeNcB1AL7AOjRkzLyPOI+zYS/").unwrap();
@@ -43,7 +43,7 @@ fn vm_benchmark(c: &mut Criterion) {
                 .build();
 
             let result = vm_state.run();
-            _ = black_box(result);
+            _ = std::hint::black_box(result);
         });
     });
 }

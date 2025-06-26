@@ -1,17 +1,17 @@
 use anyhow::Result;
-use everscale_types::models::{
+use num_bigint::{BigInt, Sign};
+use tycho_types::models::{
     AccountState, AccountStatus, ComputePhase, ComputePhaseSkipReason, CurrencyCollection,
     ExecutedComputePhase, IntAddr, IntMsgInfo, MsgType, SkippedComputePhase, StateInit, TickTock,
 };
-use everscale_types::num::Tokens;
-use everscale_types::prelude::*;
-use num_bigint::{BigInt, Sign};
-use tycho_vm::{tuple, SafeRc, SmcInfoBase, Stack, Tuple, UnpackedInMsgSmcInfo, VmState};
+use tycho_types::num::Tokens;
+use tycho_types::prelude::*;
+use tycho_vm::{SafeRc, SmcInfoBase, Stack, Tuple, UnpackedInMsgSmcInfo, VmState, tuple};
 
 use crate::phase::receive::{MsgStateInit, ReceivedMessage};
 use crate::util::{
-    check_state_limits_diff, new_varuint24_truncate, new_varuint56_truncate, unlikely,
-    StateLimitsResult,
+    StateLimitsResult, check_state_limits_diff, new_varuint24_truncate, new_varuint56_truncate,
+    unlikely,
 };
 use crate::{ExecutorInspector, ExecutorState};
 
@@ -400,7 +400,7 @@ impl ExecutorState<'_> {
 }
 
 impl ReceivedMessage {
-    fn make_tuple(&self) -> Result<Option<SafeRc<Tuple>>, everscale_types::error::Error> {
+    fn make_tuple(&self) -> Result<Option<SafeRc<Tuple>>, tycho_types::error::Error> {
         let mut cs = self.root.as_slice()?;
         if MsgType::load_from(&mut cs)? != MsgType::Int {
             return Ok(None);
@@ -437,9 +437,9 @@ impl ReceivedMessage {
 
 #[cfg(test)]
 mod tests {
-    use everscale_asm_macros::tvmasm;
-    use everscale_types::models::{ExtInMsgInfo, IntMsgInfo, LibDescr, SimpleLib, StdAddr};
-    use everscale_types::num::{VarUint24, VarUint56};
+    use tycho_asm_macros::tvmasm;
+    use tycho_types::models::{ExtInMsgInfo, IntMsgInfo, LibDescr, SimpleLib, StdAddr};
+    use tycho_types::num::{VarUint24, VarUint56};
 
     use super::*;
     use crate::tests::{make_default_config, make_default_params, make_message};
