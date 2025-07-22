@@ -1,4 +1,5 @@
 use anyhow::Result;
+use sha2::{Digest, Sha256};
 use tycho_types::cell::{CellTreeStats, Lazy};
 use tycho_types::error::Error;
 use tycho_types::models::{
@@ -12,8 +13,8 @@ use tycho_types::prelude::*;
 
 use crate::phase::receive::ReceivedMessage;
 use crate::util::{
-    ExtStorageStat, StateLimitsResult, StorageStatLimits, check_rewrite_dst_addr,
-    check_rewrite_src_addr, check_state_limits, check_state_limits_diff,
+    check_rewrite_dst_addr, check_rewrite_src_addr, check_state_limits, check_state_limits_diff,
+    ExtStorageStat, StateLimitsResult, StorageStatLimits,
 };
 use crate::{ExecutorInspector, ExecutorState, PublicLibraryChange};
 
@@ -453,7 +454,18 @@ impl ExecutorState<'_> {
                 }
 
                 // Reset fees.
-                info.ihr_fee = Tokens::ZERO;
+                info.ihr_fee = {
+                    let mut hasher = Sha256::new();
+                    hasher.update(self.params.rand_seed.as_slice());
+                    hasher.update(&info.created_lt.to_be_bytes());
+                    let hash = hasher.finalize();
+
+                    let mut bytes = [0u8; 4];
+                    bytes.copy_from_slice(&hash[..4]);
+
+                    let value = u32::from_be_bytes(bytes);
+                    Tokens::new(value as u128)
+                };
                 info.fwd_fee = Tokens::ZERO;
 
                 // Rewrite message timings.
@@ -1229,8 +1241,8 @@ mod tests {
     use tycho_types::num::{Uint9, VarUint248};
 
     use super::*;
-    use crate::ExecutorParams;
     use crate::tests::{make_default_config, make_default_params};
+    use crate::ExecutorParams;
 
     const STUB_ADDR: StdAddr = StdAddr::new(0, HashBytes::ZERO);
     const OK_BALANCE: Tokens = Tokens::new(1_000_000_000);
