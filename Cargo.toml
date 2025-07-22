@@ -36,7 +36,7 @@ tl-proto = "0.5.2"
 tracing = "0.1"
 tracing-subscriber = "0.3"
 tracing-test = "0.2"
-tycho-asm-macros = "0.1.0"
+tycho-asm-macros = { git = "https://github.com/broxus/tycho-asm.git" }
 tycho-crypto = "0.4.0"
 tycho-types = { version = "0.2.0", default-features = false, features = ["bigint"] }
 

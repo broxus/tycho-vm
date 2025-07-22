@@ -335,16 +335,19 @@ impl Stack {
 
     pub fn pop_smallint_signed_range(&mut self, min: i32, max: i32) -> VmResult<i32> {
         let item = self.pop_int()?;
-        if let Some(item) = item.to_i32() {
-            if item >= min && item <= max {
-                return Ok(item);
-            }
+        into_signed_range(item, min, max)
+    }
+
+    pub fn pop_smallint_signed_range_or_null(
+        &mut self,
+        min: i32,
+        max: i32,
+    ) -> VmResult<Option<i32>> {
+        let item = ok!(self.pop());
+        if item.ty() == StackValueType::Null {
+            return Ok(None);
         }
-        vm_bail!(IntegerOutOfRange {
-            min: min as isize,
-            max: max as isize,
-            actual: item.to_string(),
-        })
+        into_signed_range(item.into_int()?, min, max).map(Some)
     }
 
     pub fn pop_tuple(&mut self) -> VmResult<SafeRc<Tuple>> {
@@ -452,6 +455,19 @@ impl Stack {
         let last = last.as_int()?;
         last.to_i32()
     }
+}
+
+fn into_signed_range(item: SafeRc<BigInt>, min: i32, max: i32) -> VmResult<i32> {
+    if let Some(item) = item.to_i32() {
+        if item >= min && item <= max {
+            return Ok(item);
+        }
+    }
+    vm_bail!(IntegerOutOfRange {
+        min: min as isize,
+        max: max as isize,
+        actual: item.to_string(),
+    })
 }
 
 impl SafeRcMakeMut for Stack {
