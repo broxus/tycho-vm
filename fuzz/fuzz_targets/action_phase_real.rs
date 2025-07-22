@@ -2,8 +2,8 @@
 
 use arbitrary::{Arbitrary, Result, Unstructured};
 use libfuzzer_sys::fuzz_target;
-use tycho_executor::phase::{ActionPhaseContext, ActionPhaseFull, ReceivedMessage};
 use tycho_executor::ExecutorState;
+use tycho_executor::phase::{ActionPhaseContext, ActionPhaseFull, ReceivedMessage};
 use tycho_types::arbitrary::SimpleBalance;
 use tycho_types::boc::Boc;
 use tycho_types::cell::{Cell, CellBuilder, CellFamily, HashBytes};
@@ -12,7 +12,7 @@ use tycho_types::models::{
 };
 use tycho_types::num::Tokens;
 
-use self::common::{make_default_config, make_default_params, stub_compute_phase, GasFees};
+use self::common::{GasFees, make_default_config, make_default_params, stub_compute_phase};
 
 mod common;
 
