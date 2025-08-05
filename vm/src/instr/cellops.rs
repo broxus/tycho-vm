@@ -740,6 +740,23 @@ impl CellOps {
         Ok(0)
     }
 
+    #[op(code = "cf50", fmt = "BTOS")]
+    fn exec_builder_to_slice(st: &mut VmState) -> VmResult<i32> {
+        ok!(st.version.require_ton(11..)); // TODO: Should be 12
+
+        let stack = SafeRc::make_mut(&mut st.stack);
+        let builder = ok!(stack.pop_builder());
+
+        // NOTE: We are not charging for cell creation here on purpose.
+        let cell = SafeRc::unwrap_or_clone(builder).build()?;
+
+        // Load without resolving.
+        let slice = OwnedCellSlice::new_allow_exotic(cell);
+
+        ok!(stack.push(slice));
+        Ok(0)
+    }
+
     // cf$1xxxxx
     #[op_ext(code = 0xcf80 >> 7, code_bits = 9, arg_bits = 5, dump_with = dump_store_const_slice)]
     fn exec_store_const_slice(st: &mut VmState, args: u32, bits: u16) -> VmResult<i32> {
@@ -2247,7 +2264,20 @@ mod tests {
         let cell = cb.build().unwrap();
         let sc = OwnedCellSlice::new_allow_exotic(cell);
 
-        assert_run_vm!("ENDS", [slice sc] => [int 0], exit_code: 9)
+        assert_run_vm!("ENDS", [slice sc] => [int 0], exit_code: 9);
+    }
+
+    #[test]
+    #[traced_test]
+    fn btos_tests() {
+        let mut cb = CellBuilder::new();
+        cb.store_u8(1).unwrap();
+        cb.store_u8(123).unwrap();
+
+        assert_run_vm!(
+            "DUP BTOS SWAP ENDC CTOS SDEQ",
+            [builder cb] => [int -1]
+        );
     }
 
     #[test]
