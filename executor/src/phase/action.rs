@@ -10,10 +10,11 @@ use tycho_types::models::{
 use tycho_types::num::{Tokens, VarUint56};
 use tycho_types::prelude::*;
 
+use crate::config::ParsedAuthorityParams;
 use crate::phase::receive::ReceivedMessage;
 use crate::util::{
-    ExtStorageStat, StateLimitsResult, StorageStatLimits, check_rewrite_dst_addr,
-    check_rewrite_src_addr, check_state_limits, check_state_limits_diff,
+    ExtStorageStat, StateLimitsResult, StorageStatLimits, check_authority_address,
+    check_rewrite_dst_addr, check_rewrite_src_addr, check_state_limits, check_state_limits_diff,
 };
 use crate::{ExecutorInspector, ExecutorState, PublicLibraryChange};
 
@@ -172,6 +173,7 @@ impl ExecutorState<'_> {
             out_msgs: Vec::new(),
             delete_account: false,
             public_libs_diff: ctx.inspector.is_some().then(Vec::new),
+            authority_params: self.config.authority_params.clone(),
             compute_phase: ctx.compute_phase,
             action_phase: &mut res.action_phase,
         };
@@ -611,6 +613,19 @@ impl ExecutorState<'_> {
                     return check_skip_invalid(ResultCode::TooManyExtraCurrencies, ctx);
                 }
 
+                // Check if account is allowed to send specific extra currencies
+                if let Some(ac) = &ctx.authority_params {
+                    let is_valid = check_authority_address(&self.address, &ac.authority_accounts);
+                    if !is_valid {
+                        let extra_value = info.value.other.as_dict();
+                        if extra_value.contains_key(ac.white_mark_id)?
+                            || extra_value.contains_key(ac.black_mark_id)?
+                        {
+                            return check_skip_invalid(ResultCode::NotEnoughExtraBalance, ctx);
+                        }
+                    }
+                }
+
                 // Try to withdraw extra currencies from the remaining balance.
                 let other = match ctx.remaining_balance.other.checked_sub(&info.value.other) {
                     Ok(other) => other,
@@ -924,6 +939,8 @@ struct ActionContext<'a> {
     delete_account: bool,
     public_libs_diff: Option<Vec<PublicLibraryChange>>,
 
+    authority_params: Option<ParsedAuthorityParams>,
+
     compute_phase: &'a ExecutedComputePhase,
     action_phase: &'a mut ActionPhase,
 }
@@ -960,14 +977,30 @@ impl ActionContext<'_> {
         fees_total: Tokens,
     ) -> Result<Tokens, ActionFailed> {
         // Update `value` based on flags.
+
+        fn remove_system_currencies(
+            params: &ParsedAuthorityParams,
+            account_balance: &CurrencyCollection,
+        ) -> Result<CurrencyCollection> {
+            let mut value = account_balance.clone();
+            let dict = value.other.as_dict_mut();
+            dict.remove(params.black_mark_id)?;
+            dict.remove(params.white_mark_id)?;
+            Ok(value)
+        }
+
         if mode.contains(SendMsgFlags::ALL_BALANCE) {
             // Attach all remaining balance to the message.
             if self.strict_extra_currency {
                 // Attach only native balance when strict behaviour is enabled.
                 value.tokens = self.remaining_balance.tokens;
             } else {
-                // Attach both native and extra currencies otherwise.
-                *value = self.remaining_balance.clone();
+                // Attach both native and extra currencies otherwise except system currencies.
+                if let Some(ctx) = &self.authority_params {
+                    *value = remove_system_currencies(ctx, &self.remaining_balance)?;
+                } else {
+                    *value = self.remaining_balance.clone();
+                }
             };
             // Pay fees from the attached value.
             mode.remove(SendMsgFlags::PAY_FEE_SEPARATELY);
@@ -979,8 +1012,14 @@ impl ActionContext<'_> {
                     // Attach only native balance when strict behaviour is enabled.
                     value.try_add_assign_tokens(msg.balance_remaining.tokens)?;
                 } else {
-                    // Attach both native and extra currencies otherwise.
-                    value.try_add_assign(&msg.balance_remaining)?;
+                    // Attach both native and extra currencies except system currencies otherwise.
+                    if let Some(ctx) = &self.authority_params {
+                        let remaining_balance =
+                            remove_system_currencies(ctx, &self.remaining_balance)?;
+                        value.try_add_assign(&remaining_balance)?;
+                    } else {
+                        value.try_add_assign(&self.remaining_balance)?;
+                    }
                 }
             }
 

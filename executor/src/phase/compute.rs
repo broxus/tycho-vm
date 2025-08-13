@@ -10,8 +10,8 @@ use tycho_vm::{SafeRc, SmcInfoBase, Stack, Tuple, UnpackedInMsgSmcInfo, VmState,
 
 use crate::phase::receive::{MsgStateInit, ReceivedMessage};
 use crate::util::{
-    StateLimitsResult, check_state_limits_diff, new_varuint24_truncate, new_varuint56_truncate,
-    unlikely,
+    StateLimitsResult, check_authority_address, check_state_limits_diff, new_varuint24_truncate,
+    new_varuint56_truncate, unlikely,
 };
 use crate::{ExecutorInspector, ExecutorState};
 
@@ -122,6 +122,26 @@ impl ExecutorState<'_> {
                 reason: ComputePhaseSkipReason::NoGas,
             });
             return Ok(res);
+        }
+
+        if let Some(params) = &self.config.authority_params {
+            let is_valid = check_authority_address(&self.address, &params.authority_accounts);
+            if !is_valid {
+                let extra_currencies = self.balance.other.as_dict();
+                let white_mark_token_amount = extra_currencies
+                    .get(params.white_mark_id)?
+                    .unwrap_or_default();
+                let black_mark_token_amount = extra_currencies
+                    .get(params.black_mark_id)?
+                    .unwrap_or_default();
+
+                if black_mark_token_amount > white_mark_token_amount {
+                    res.compute_phase = ComputePhase::Skipped(SkippedComputePhase {
+                        reason: ComputePhaseSkipReason::Suspended,
+                    });
+                    return Ok(res);
+                }
+            }
         }
 
         let (msg_balance_remaining, is_external) = match ctx.input.in_msg() {

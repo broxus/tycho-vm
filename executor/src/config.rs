@@ -1,4 +1,4 @@
-use ahash::{HashMap, HashSet};
+use ahash::{HashMap, HashSet, HashSetExt};
 use anyhow::Result;
 use tycho_types::error::Error;
 use tycho_types::models::{
@@ -24,8 +24,16 @@ pub struct ParsedConfig {
     pub global: GlobalVersion,
     pub workchains: HashMap<i32, WorkchainDescription>,
     pub special_accounts: HashSet<HashBytes>,
+    pub authority_params: Option<ParsedAuthorityParams>,
     pub raw: BlockchainConfig,
     pub unpacked: UnpackedConfig,
+}
+
+#[derive(Clone)]
+pub struct ParsedAuthorityParams {
+    pub authority_accounts: HashSet<HashBytes>,
+    pub black_mark_id: u32,
+    pub white_mark_id: u32,
 }
 
 impl ParsedConfig {
@@ -96,6 +104,21 @@ impl ParsedConfig {
             special_accounts.insert(addr?);
         }
 
+        let authority_params = match config.params.get_authority_params() {
+            Ok(params_raw) => {
+                let mut authority_accounts = HashSet::<HashBytes>::new();
+                for addr in params_raw.authority_addresses.keys() {
+                    authority_accounts.insert(addr?);
+                }
+                Some(ParsedAuthorityParams {
+                    authority_accounts,
+                    black_mark_id: params_raw.black_mark_id,
+                    white_mark_id: params_raw.white_mark_id,
+                })
+            }
+            _ => None,
+        };
+
         Ok(Self {
             blackhole_addr: burning.blackhole_addr,
             mc_gas_prices: mc_gas_prices_raw.parse::<GasLimitsPrices>()?,
@@ -111,6 +134,7 @@ impl ParsedConfig {
             global,
             workchains,
             special_accounts,
+            authority_params,
             raw: config,
             unpacked: UnpackedConfig {
                 latest_storage_prices,

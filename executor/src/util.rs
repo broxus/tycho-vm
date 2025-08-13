@@ -1,6 +1,6 @@
 use std::mem::ManuallyDrop;
 
-use ahash::HashMap;
+use ahash::{HashMap, HashSet};
 use tycho_types::cell::CellTreeStats;
 use tycho_types::models::{
     IntAddr, ShardIdent, SimpleLib, SizeLimitsConfig, StateInit, StdAddr, WorkchainDescription,
@@ -185,6 +185,10 @@ pub fn check_rewrite_src_addr(my_addr: &StdAddr, addr: &mut Option<IntAddr>) -> 
         // All other addresses are considered invalid.
         Some(_) => false,
     }
+}
+
+pub fn check_authority_address(my_addr: &StdAddr, special_addresses: &HashSet<HashBytes>) -> bool {
+    my_addr.is_masterchain() && special_addresses.contains(&my_addr.address)
 }
 
 /// Rewrite message destination address.
