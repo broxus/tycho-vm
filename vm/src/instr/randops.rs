@@ -61,15 +61,15 @@ impl RandOps {
 
         let Some(t1v) = c7.first().cloned() else {
             vm_bail!(InvalidType {
-                expected: StackValueType::Tuple,
-                actual: StackValueType::Null
+                expected: StackValueType::Tuple as _,
+                actual: StackValueType::Null as _
             })
         };
 
         let Some(t1) = t1v.as_tuple_range(0, 255) else {
             vm_bail!(InvalidType {
-                expected: StackValueType::Tuple,
-                actual: t1v.ty()
+                expected: StackValueType::Tuple as _,
+                actual: t1v.raw_ty()
             })
         };
 
@@ -80,8 +80,8 @@ impl RandOps {
                     ok!(to_bytes_be(&value))
                 }
                 None => vm_bail!(InvalidType {
-                    expected: StackValueType::Int,
-                    actual: StackValueType::Null
+                    expected: StackValueType::Int as _,
+                    actual: StackValueType::Null as _
                 }),
             };
 
@@ -134,14 +134,14 @@ fn generate_random_u256(regs: &mut ControlRegs, gas: &GasConsumer) -> VmResult<H
 
     let Some(t1v) = c7.first().cloned() else {
         vm_bail!(InvalidType {
-            expected: StackValueType::Tuple,
-            actual: StackValueType::Null
+            expected: StackValueType::Tuple as _,
+            actual: StackValueType::Null as _
         })
     };
     let Some(t1) = t1v.as_tuple_range(0, 255) else {
         vm_bail!(InvalidType {
-            expected: StackValueType::Tuple,
-            actual: t1v.ty()
+            expected: StackValueType::Tuple as _,
+            actual: t1v.raw_ty()
         })
     };
 
@@ -155,8 +155,8 @@ fn generate_random_u256(regs: &mut ControlRegs, gas: &GasConsumer) -> VmResult<H
             sha2::Sha512::digest(seed_bytes).into()
         }
         None => vm_bail!(InvalidType {
-            expected: StackValueType::Int,
-            actual: StackValueType::Null
+            expected: StackValueType::Int as _,
+            actual: StackValueType::Null as _
         }),
     };
 

@@ -411,8 +411,8 @@ impl<'a> HashInputReader<'a, '_> {
             Ok(builder.as_data_slice())
         } else {
             vm_bail!(InvalidType {
-                expected: StackValueType::Slice,
-                actual: value.ty()
+                expected: StackValueType::Slice as _,
+                actual: value.raw_ty()
             })
         }
     }

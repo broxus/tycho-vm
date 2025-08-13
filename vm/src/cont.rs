@@ -340,8 +340,8 @@ impl<T: Cont + 'static> StackValue for T {
         self
     }
 
-    fn ty(&self) -> StackValueType {
-        StackValueType::Cont
+    fn raw_ty(&self) -> u8 {
+        StackValueType::Cont as _
     }
 
     fn store_as_stack_value(

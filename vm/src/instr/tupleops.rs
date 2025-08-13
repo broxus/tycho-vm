@@ -427,8 +427,8 @@ fn tuple_set_index_quiet_impl(stack: &mut Stack, i: usize, gas: &GasConsumer) ->
 fn index_stack_value_as_tuple(value: &dyn StackValue, i: usize) -> VmResult<&RcStackValue> {
     let Some(tuple) = value.as_tuple_range(0, 255) else {
         vm_bail!(InvalidType {
-            expected: StackValueType::Tuple,
-            actual: value.ty(),
+            expected: StackValueType::Tuple as _,
+            actual: value.raw_ty(),
         });
     };
 

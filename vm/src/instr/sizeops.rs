@@ -37,8 +37,8 @@ impl SizeOps {
         let ok = if is_slice {
             let Some(slice) = value.as_cell_slice() else {
                 vm_bail!(InvalidType {
-                    expected: StackValueType::Slice,
-                    actual: value.ty()
+                    expected: StackValueType::Slice as _,
+                    actual: value.raw_ty()
                 })
             };
             let cs = slice.apply();
@@ -46,8 +46,8 @@ impl SizeOps {
         } else {
             let Some(cell) = value.as_cell() else {
                 vm_bail!(InvalidType {
-                    expected: StackValueType::Cell,
-                    actual: value.ty()
+                    expected: StackValueType::Cell as _,
+                    actual: value.raw_ty()
                 })
             };
             ok!(storage.add_cell(cell.as_ref()))

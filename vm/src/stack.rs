@@ -298,7 +298,7 @@ impl Stack {
 
     pub fn pop_int_or_nan(&mut self) -> VmResult<Option<SafeRc<BigInt>>> {
         let value = ok!(self.pop());
-        if value.ty() == StackValueType::Int && value.as_int().is_none() {
+        if value.raw_ty() == StackValueType::Int as u8 && value.as_int().is_none() {
             Ok(None)
         } else {
             value.into_int().map(Some)
@@ -344,7 +344,7 @@ impl Stack {
         max: i32,
     ) -> VmResult<Option<i32>> {
         let item = ok!(self.pop());
-        if item.ty() == StackValueType::Null {
+        if item.raw_ty() == StackValueType::Null as u8 {
             return Ok(None);
         }
         into_signed_range(item.into_int()?, min, max).map(Some)
@@ -359,8 +359,8 @@ impl Stack {
         vm_ensure!(
             (min_len as usize..=max_len as usize).contains(&tuple.len()),
             InvalidType {
-                expected: StackValueType::Tuple,
-                actual: StackValueType::Tuple,
+                expected: StackValueType::Tuple as _,
+                actual: StackValueType::Tuple as _,
             }
         );
         Ok(tuple)
@@ -382,8 +382,8 @@ impl Stack {
         vm_ensure!(
             (min_len as usize..=max_len as usize).contains(&tuple.len()),
             InvalidType {
-                expected: StackValueType::Tuple,
-                actual: StackValueType::Tuple,
+                expected: StackValueType::Tuple as _,
+                actual: StackValueType::Tuple as _,
             }
         );
         Ok(Some(tuple))
@@ -551,24 +551,76 @@ impl<'a> Load<'a> for Stack {
 /// [`Stack`] item.
 pub type RcStackValue = SafeRc<dyn StackValue>;
 
-/// A value type of [`StackValue`].
-#[derive(Debug, Clone, Copy, Eq, PartialEq)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-pub enum StackValueType {
-    Null,
-    Int,
-    Cell,
-    Slice,
-    Builder,
-    Cont,
-    Tuple,
+macro_rules! define_stack_value_type {
+    (
+        $(#[$($meta:tt)*])*
+        $vis:vis enum $ident:ident {
+            $($name:ident = $n:literal),*$(,)?
+        }
+    ) => {
+        $(#[$($meta)*])*
+        $vis enum $ident {
+            $($name = $n,)*
+        }
+
+        impl $ident {
+            pub fn from_raw(value: u8) -> Option<Self> {
+                Some(match value {
+                    $($n => Self::$name,)*
+                    _ => return None,
+                })
+            }
+        }
+    };
+}
+
+define_stack_value_type! {
+    /// A value type of [`StackValue`].
+    #[derive(Debug, Clone, Copy, Eq, PartialEq)]
+    #[repr(u8)]
+    #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
+    pub enum StackValueType {
+        Null = 0,
+        Int = 1,
+        Cell = 2,
+        Slice = 3,
+        Builder = 4,
+        Cont = 5,
+        Tuple = 6,
+    }
+}
+
+impl StackValueType {
+    pub fn display_raw(value: u8) -> impl std::fmt::Display + Copy {
+        #[derive(Clone, Copy)]
+        #[repr(transparent)]
+        struct DisplayRaw(u8);
+
+        impl std::fmt::Display for DisplayRaw {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                match StackValueType::from_raw(self.0) {
+                    Some(ty) => std::fmt::Debug::fmt(&ty, f),
+                    None => write!(f, "Type#{}", self.0),
+                }
+            }
+        }
+
+        DisplayRaw(value)
+    }
+}
+
+impl From<StackValueType> for u8 {
+    #[inline]
+    fn from(value: StackValueType) -> Self {
+        value as u8
+    }
 }
 
 /// Interface of a [`Stack`] item.
 pub trait StackValue: SafeDelete + std::fmt::Debug {
     fn rc_into_dyn(self: Rc<Self>) -> Rc<dyn StackValue>;
 
-    fn ty(&self) -> StackValueType;
+    fn raw_ty(&self) -> u8;
 
     fn store_as_stack_value(
         &self,
@@ -585,12 +637,12 @@ pub trait StackValue: SafeDelete + std::fmt::Debug {
     fn try_as_int(&self) -> VmResult<&BigInt> {
         match self.as_int() {
             Some(value) => Ok(value),
-            None => Err(invalid_type(self.ty(), StackValueType::Int)),
+            None => Err(invalid_type(self.raw_ty(), StackValueType::Int)),
         }
     }
 
     fn rc_into_int(self: Rc<Self>) -> VmResult<Rc<BigInt>> {
-        Err(invalid_type(self.ty(), StackValueType::Int))
+        Err(invalid_type(self.raw_ty(), StackValueType::Int))
     }
 
     fn as_cell(&self) -> Option<&Cell> {
@@ -600,12 +652,12 @@ pub trait StackValue: SafeDelete + std::fmt::Debug {
     fn try_as_cell(&self) -> VmResult<&Cell> {
         match self.as_cell() {
             Some(value) => Ok(value),
-            None => Err(invalid_type(self.ty(), StackValueType::Cell)),
+            None => Err(invalid_type(self.raw_ty(), StackValueType::Cell)),
         }
     }
 
     fn rc_into_cell(self: Rc<Self>) -> VmResult<Rc<Cell>> {
-        Err(invalid_type(self.ty(), StackValueType::Cell))
+        Err(invalid_type(self.raw_ty(), StackValueType::Cell))
     }
 
     fn as_cell_slice(&self) -> Option<&OwnedCellSlice> {
@@ -615,12 +667,12 @@ pub trait StackValue: SafeDelete + std::fmt::Debug {
     fn try_as_cell_slice(&self) -> VmResult<&OwnedCellSlice> {
         match self.as_cell_slice() {
             Some(value) => Ok(value),
-            None => Err(invalid_type(self.ty(), StackValueType::Slice)),
+            None => Err(invalid_type(self.raw_ty(), StackValueType::Slice)),
         }
     }
 
     fn rc_into_cell_slice(self: Rc<Self>) -> VmResult<Rc<OwnedCellSlice>> {
-        Err(invalid_type(self.ty(), StackValueType::Slice))
+        Err(invalid_type(self.raw_ty(), StackValueType::Slice))
     }
 
     fn as_cell_builder(&self) -> Option<&CellBuilder> {
@@ -630,12 +682,12 @@ pub trait StackValue: SafeDelete + std::fmt::Debug {
     fn try_as_cell_builder(&self) -> VmResult<&CellBuilder> {
         match self.as_cell_builder() {
             Some(value) => Ok(value),
-            None => Err(invalid_type(self.ty(), StackValueType::Builder)),
+            None => Err(invalid_type(self.raw_ty(), StackValueType::Builder)),
         }
     }
 
     fn rc_into_cell_builder(self: Rc<Self>) -> VmResult<Rc<CellBuilder>> {
-        Err(invalid_type(self.ty(), StackValueType::Builder))
+        Err(invalid_type(self.raw_ty(), StackValueType::Builder))
     }
 
     fn as_cont(&self) -> Option<&dyn Cont> {
@@ -645,12 +697,12 @@ pub trait StackValue: SafeDelete + std::fmt::Debug {
     fn try_as_cont(&self) -> VmResult<&dyn Cont> {
         match self.as_cont() {
             Some(value) => Ok(value),
-            None => Err(invalid_type(self.ty(), StackValueType::Cont)),
+            None => Err(invalid_type(self.raw_ty(), StackValueType::Cont)),
         }
     }
 
     fn rc_into_cont(self: Rc<Self>) -> VmResult<Rc<dyn Cont>> {
-        Err(invalid_type(self.ty(), StackValueType::Cont))
+        Err(invalid_type(self.raw_ty(), StackValueType::Cont))
     }
 
     fn as_tuple(&self) -> Option<&[RcStackValue]> {
@@ -660,22 +712,22 @@ pub trait StackValue: SafeDelete + std::fmt::Debug {
     fn try_as_tuple(&self) -> VmResult<&[RcStackValue]> {
         match self.as_tuple() {
             Some(value) => Ok(value),
-            None => Err(invalid_type(self.ty(), StackValueType::Tuple)),
+            None => Err(invalid_type(self.raw_ty(), StackValueType::Tuple)),
         }
     }
 
     fn rc_into_tuple(self: Rc<Self>) -> VmResult<Rc<Tuple>> {
-        Err(invalid_type(self.ty(), StackValueType::Tuple))
+        Err(invalid_type(self.raw_ty(), StackValueType::Tuple))
     }
 }
 
 impl dyn StackValue + '_ {
     pub fn is_null(&self) -> bool {
-        self.ty() == StackValueType::Null
+        self.raw_ty() == StackValueType::Null as u8
     }
 
     pub fn is_tuple(&self) -> bool {
-        self.ty() == StackValueType::Tuple
+        self.raw_ty() == StackValueType::Tuple as u8
     }
 
     pub fn as_tuple_range(&self, min_len: u32, max_len: u32) -> Option<&[RcStackValue]> {
@@ -769,8 +821,11 @@ pub trait StaticStackValue: StackValue {
     fn from_dyn_ref(value: &dyn StackValue) -> VmResult<Self::DynRef<'_>>;
 }
 
-fn invalid_type(actual: StackValueType, expected: StackValueType) -> Box<VmError> {
-    Box::new(VmError::InvalidType { expected, actual })
+fn invalid_type(actual: u8, expected: StackValueType) -> Box<VmError> {
+    Box::new(VmError::InvalidType {
+        expected: expected as _,
+        actual,
+    })
 }
 
 // === Null ===
@@ -781,8 +836,8 @@ impl StackValue for () {
         self
     }
 
-    fn ty(&self) -> StackValueType {
-        StackValueType::Null
+    fn raw_ty(&self) -> u8 {
+        StackValueType::Null as _
     }
 
     fn store_as_stack_value(
@@ -811,8 +866,8 @@ impl StackValue for NaN {
         self
     }
 
-    fn ty(&self) -> StackValueType {
-        StackValueType::Int
+    fn raw_ty(&self) -> u8 {
+        StackValueType::Int as _
     }
 
     fn store_as_stack_value(
@@ -852,8 +907,8 @@ impl StackValue for BigInt {
         self
     }
 
-    fn ty(&self) -> StackValueType {
-        StackValueType::Int
+    fn raw_ty(&self) -> u8 {
+        StackValueType::Int as _
     }
 
     fn store_as_stack_value(
@@ -901,8 +956,8 @@ impl StaticStackValue for BigInt {
         match value.as_int() {
             Some(value) => Ok(value),
             None => vm_bail!(InvalidType {
-                expected: StackValueType::Int,
-                actual: value.ty(),
+                expected: StackValueType::Int as _,
+                actual: value.raw_ty(),
             }),
         }
     }
@@ -923,8 +978,8 @@ impl StackValue for Cell {
         self
     }
 
-    fn ty(&self) -> StackValueType {
-        StackValueType::Cell
+    fn raw_ty(&self) -> u8 {
+        StackValueType::Cell as _
     }
 
     fn store_as_stack_value(
@@ -965,8 +1020,8 @@ impl StaticStackValue for Cell {
         match value.as_cell() {
             Some(value) => Ok(value),
             None => vm_bail!(InvalidType {
-                expected: StackValueType::Cell,
-                actual: value.ty(),
+                expected: StackValueType::Cell as _,
+                actual: value.raw_ty(),
             }),
         }
     }
@@ -987,8 +1042,8 @@ impl StackValue for OwnedCellSlice {
         self
     }
 
-    fn ty(&self) -> StackValueType {
-        StackValueType::Slice
+    fn raw_ty(&self) -> u8 {
+        StackValueType::Slice as _
     }
 
     fn store_as_stack_value(
@@ -1029,8 +1084,8 @@ impl StaticStackValue for OwnedCellSlice {
         match value.as_cell_slice() {
             Some(value) => Ok(value),
             None => vm_bail!(InvalidType {
-                expected: StackValueType::Slice,
-                actual: value.ty(),
+                expected: StackValueType::Slice as _,
+                actual: value.raw_ty(),
             }),
         }
     }
@@ -1051,8 +1106,8 @@ impl StackValue for CellBuilder {
         self
     }
 
-    fn ty(&self) -> StackValueType {
-        StackValueType::Builder
+    fn raw_ty(&self) -> u8 {
+        StackValueType::Builder as _
     }
 
     fn store_as_stack_value(
@@ -1098,8 +1153,8 @@ impl StaticStackValue for CellBuilder {
         match value.as_cell_builder() {
             Some(value) => Ok(value),
             None => vm_bail!(InvalidType {
-                expected: StackValueType::Builder,
-                actual: value.ty(),
+                expected: StackValueType::Builder as _,
+                actual: value.raw_ty(),
             }),
         }
     }
@@ -1120,8 +1175,8 @@ impl StackValue for dyn Cont {
         Cont::rc_into_dyn(self)
     }
 
-    fn ty(&self) -> StackValueType {
-        StackValueType::Cont
+    fn raw_ty(&self) -> u8 {
+        StackValueType::Cont as _
     }
 
     fn store_as_stack_value(
@@ -1162,8 +1217,8 @@ impl StaticStackValue for dyn Cont {
         match value.as_cont() {
             Some(value) => Ok(value),
             None => vm_bail!(InvalidType {
-                expected: StackValueType::Cont,
-                actual: value.ty(),
+                expected: StackValueType::Cont as _,
+                actual: value.raw_ty(),
             }),
         }
     }
@@ -1198,8 +1253,8 @@ pub trait TupleExt {
         } else {
             // NOTE: This error is logically incorrect, but it is the desired behaviour.
             vm_bail!(InvalidType {
-                expected: StackValueType::Tuple,
-                actual: StackValueType::Null
+                expected: StackValueType::Tuple as _,
+                actual: StackValueType::Null as _
             })
         }
     }
@@ -1224,8 +1279,8 @@ impl StackValue for Tuple {
         self
     }
 
-    fn ty(&self) -> StackValueType {
-        StackValueType::Tuple
+    fn raw_ty(&self) -> u8 {
+        StackValueType::Tuple as _
     }
 
     fn store_as_stack_value(
@@ -1305,8 +1360,8 @@ impl StaticStackValue for Tuple {
         match value.as_tuple() {
             Some(value) => Ok(value),
             None => vm_bail!(InvalidType {
-                expected: StackValueType::Tuple,
-                actual: value.ty(),
+                expected: StackValueType::Tuple as _,
+                actual: value.raw_ty(),
             }),
         }
     }

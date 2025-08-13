@@ -26,11 +26,12 @@ pub enum VmError {
     IntegerOverflow,
     #[error("invalid opcode")]
     InvalidOpcode,
-    #[error("expected type {expected:?}, found {actual:?}")]
-    InvalidType {
-        expected: StackValueType,
-        actual: StackValueType,
-    },
+    #[error(
+        "expected type {}, found {}",
+        StackValueType::display_raw(*expected),
+        StackValueType::display_raw(*actual),
+    )]
+    InvalidType { expected: u8, actual: u8 },
     #[error("out of gas")]
     OutOfGas,
     #[error(transparent)]

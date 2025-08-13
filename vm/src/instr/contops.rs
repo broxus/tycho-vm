@@ -381,9 +381,9 @@ impl ContOps {
         let stack = SafeRc::make_mut(&mut st.stack);
         let y = ok!(stack.pop());
         let x = ok!(stack.pop());
-        vm_ensure!(x.ty() == y.ty(), InvalidType {
-            expected: x.ty(),
-            actual: y.ty(),
+        vm_ensure!(x.raw_ty() == y.raw_ty(), InvalidType {
+            expected: x.raw_ty(),
+            actual: y.raw_ty(),
         });
         let cond = ok!(stack.pop_bool());
         ok!(stack.push_raw(match cond {
@@ -778,10 +778,13 @@ impl ContOps {
         let value = ok!(stack.pop());
         let mut c0 = st.cr.c[0].clone().expect("c0 should always be set");
 
-        vm_ensure!(i > 0 || value.ty() == StackValueType::Cont, InvalidType {
-            expected: StackValueType::Cont,
-            actual: value.ty(),
-        });
+        vm_ensure!(
+            i > 0 || value.raw_ty() == StackValueType::Cont as u8,
+            InvalidType {
+                expected: StackValueType::Cont as _,
+                actual: value.raw_ty(),
+            }
+        );
 
         let prev = st
             .cr
@@ -917,8 +920,8 @@ impl ContOps {
 
             let Some(st_value) = st.cr.get_as_stack_value(i) else {
                 vm_bail!(InvalidType {
-                    expected: StackValueType::Cont,
-                    actual: StackValueType::Null
+                    expected: StackValueType::Cont as _,
+                    actual: StackValueType::Null as _
                 })
             };
             ok!(force_cdata(&mut cont).save.define(i, st_value));
@@ -1041,8 +1044,8 @@ impl ContOps {
         ok!(SafeRc::make_mut(&mut st.stack).push_int(n));
         let Some(c3) = st.cr.c[3].clone() else {
             vm_bail!(InvalidType {
-                expected: StackValueType::Cont,
-                actual: StackValueType::Null,
+                expected: StackValueType::Cont as _,
+                actual: StackValueType::Null as _,
             });
         };
         st.call(c3)
@@ -1053,8 +1056,8 @@ impl ContOps {
         ok!(SafeRc::make_mut(&mut st.stack).push_int(n));
         let Some(c3) = st.cr.c[3].clone() else {
             vm_bail!(InvalidType {
-                expected: StackValueType::Cont,
-                actual: StackValueType::Null,
+                expected: StackValueType::Cont as _,
+                actual: StackValueType::Null as _,
             });
         };
         st.jump(c3)
