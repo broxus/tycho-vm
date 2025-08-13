@@ -44,6 +44,17 @@ impl ExecutorState<'_> {
         let is_masterchain = self.address.is_masterchain();
         let config = self.config.gas_prices(is_masterchain);
 
+        if self.is_suspended_by_marks {
+            // Skip storage phase for accounts suspended by marks.
+            // Authority has frozen the exact amount of tokens so this value
+            // cannot be changed.
+            return Ok(StoragePhase {
+                storage_fees_collected: Tokens::ZERO,
+                storage_fees_due: self.storage_stat.due_payment,
+                status_change: AccountStatusChange::Unchanged,
+            });
+        }
+
         // Compute how much this account must pay for storing its state up until now.
         let mut to_pay = self.config.compute_storage_fees(
             &self.storage_stat,
@@ -161,14 +172,20 @@ impl ExecutorState<'_> {
 
 #[cfg(test)]
 mod tests {
-    use tycho_types::cell::HashBytes;
-    use tycho_types::models::{CurrencyCollection, StdAddr, StorageInfo, StorageUsed};
-    use tycho_types::num::VarUint56;
+    use std::collections::BTreeMap;
+
+    use tycho_asm_macros::tvmasm;
+    use tycho_types::cell::{CellBuilder, HashBytes};
+    use tycho_types::dict::Dict;
+    use tycho_types::models::{
+        AuthorityMarksConfig, CurrencyCollection, StdAddr, StorageInfo, StorageUsed,
+    };
+    use tycho_types::num::{VarUint56, VarUint248};
 
     use super::*;
-    use crate::ParsedConfig;
-    use crate::tests::{make_default_config, make_default_params};
+    use crate::tests::{make_custom_config, make_default_config, make_default_params};
     use crate::util::shift_ceil_price;
+    use crate::{ExecutorParams, ParsedConfig};
 
     const STUB_ADDR: StdAddr = StdAddr::new(0, HashBytes::ZERO);
 
@@ -376,5 +393,69 @@ mod tests {
             state.storage_stat.due_payment,
             Some(prev_due + target_fee - prev_balance.tokens)
         );
+    }
+
+    #[test]
+    fn suspended_account_storage_phase_skipped() -> anyhow::Result<()> {
+        let params = ExecutorParams {
+            authority_marks_enabled: true,
+            ..make_default_params()
+        };
+
+        let config = make_custom_config(|config| {
+            config.set_authority_marks_config(&AuthorityMarksConfig {
+                authority_addresses: Dict::new(),
+                black_mark_id: 100,
+                white_mark_id: 101,
+            })?;
+            Ok(())
+        });
+
+        let mut state = ExecutorState::new_active(
+            &params,
+            &config,
+            &STUB_ADDR,
+            CurrencyCollection {
+                tokens: Tokens::MAX,
+                other: BTreeMap::from_iter([
+                    (100u32, VarUint248::new(500)), // black marks
+                ])
+                .try_into()?,
+            },
+            CellBuilder::build_from(u32::MIN)?,
+            tvmasm!("ACCEPT"),
+        );
+        state.storage_stat = StorageInfo {
+            used: StorageUsed {
+                bits: VarUint56::new(1000),
+                cells: VarUint56::new(10),
+            },
+            storage_extra: Default::default(),
+            last_paid: 1000,
+            due_payment: None,
+        };
+
+        let prev_storage_stat = state.storage_stat.clone();
+        let prev_balance = state.balance.clone();
+        let prev_status = state.end_status;
+        let prev_total_fees = state.total_fees;
+        let prev_due = state.storage_stat.due_payment;
+
+        let storage_phase = state.storage_phase(StoragePhaseContext {
+            adjust_msg_balance: false,
+            received_message: None,
+        })?;
+
+        // everything should not change
+        assert_eq!(prev_storage_stat, state.storage_stat);
+        assert_eq!(prev_balance, state.balance);
+        assert_eq!(prev_status, state.end_status);
+        assert_eq!(prev_total_fees, state.total_fees);
+
+        assert_eq!(storage_phase.storage_fees_collected, Tokens::ZERO);
+        assert_eq!(storage_phase.storage_fees_due, prev_due);
+        assert_eq!(storage_phase.status_change, AccountStatusChange::Unchanged);
+
+        Ok(())
     }
 }

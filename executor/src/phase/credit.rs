@@ -24,6 +24,14 @@ impl ExecutorState<'_> {
         // Remaining message balance is added to the account balamce.
         self.balance.try_add_assign(&received.balance_remaining)?;
 
+        // Update suspension flag.
+        if self.params.authority_marks_enabled && !self.is_special && !self.is_marks_authority {
+            self.is_suspended_by_marks = matches!(
+                &self.config.authority_marks,
+                Some(marks) if marks.is_suspended(&self.balance)?,
+            );
+        }
+
         Ok(CreditPhase {
             // Due payment is only collected in storage phase.
             // For messages with bounce flag, contract always receives

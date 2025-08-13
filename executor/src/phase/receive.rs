@@ -50,6 +50,12 @@ impl ExecutorState<'_> {
             }
             // Handle external (in) message.
             MsgInfo::ExtIn(info) => {
+                if self.is_suspended_by_marks {
+                    // Accounts suspended by authority marks cannot receive
+                    // external messages until they are unsuspended.
+                    anyhow::bail!("account was suspended by authority marks");
+                }
+
                 self.check_message_dst(&info.dst)?;
 
                 // Update flags.
@@ -208,10 +214,15 @@ impl MsgStateInit {
 
 #[cfg(test)]
 mod tests {
-    use tycho_types::models::{BurningConfig, ExtInMsgInfo, ExtOutMsgInfo, IntMsgInfo, StdAddr};
-    use tycho_types::num::Tokens;
+    use std::collections::BTreeMap;
+
+    use tycho_types::models::{
+        AuthorityMarksConfig, BurningConfig, ExtInMsgInfo, ExtOutMsgInfo, IntMsgInfo, StdAddr,
+    };
+    use tycho_types::num::{Tokens, VarUint248};
 
     use super::*;
+    use crate::ExecutorParams;
     use crate::tests::{
         make_big_tree, make_custom_config, make_default_config, make_default_params, make_message,
     };
@@ -428,6 +439,45 @@ mod tests {
             ))
             .inspect_err(|e| println!("{e}"))
             .unwrap_err();
+    }
+
+    #[test]
+    fn receive_ext_in_suspended_by_marks() -> anyhow::Result<()> {
+        let params = ExecutorParams {
+            authority_marks_enabled: true,
+            ..make_default_params()
+        };
+
+        let config = make_custom_config(|config| {
+            config.set_authority_marks_config(&AuthorityMarksConfig {
+                authority_addresses: Dict::new(),
+                black_mark_id: 100,
+                white_mark_id: 101,
+            })?;
+            Ok(())
+        });
+
+        let balance = CurrencyCollection {
+            tokens: OK_BALANCE,
+            other: BTreeMap::from_iter([
+                (100u32, VarUint248::new(1)), // blocked by black marks
+            ])
+            .try_into()?,
+        };
+
+        ExecutorState::new_uninit(&params, &config, &STUB_ADDR, balance)
+            .receive_in_msg(make_message(
+                ExtInMsgInfo {
+                    dst: STUB_ADDR.into(),
+                    ..Default::default()
+                },
+                None,
+                None,
+            ))
+            .inspect_err(|e| println!("{e}"))
+            .unwrap_err();
+
+        Ok(())
     }
 
     #[test]

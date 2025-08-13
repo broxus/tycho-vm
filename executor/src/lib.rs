@@ -174,10 +174,22 @@ impl<'a> Executor<'a> {
             }
         };
 
+        let mut is_marks_authority = false;
+        let mut is_suspended_by_marks = false;
+        if self.params.authority_marks_enabled {
+            if let Some(marks) = &self.config.authority_marks {
+                is_marks_authority = marks.is_authority(address);
+                is_suspended_by_marks =
+                    !is_special && !is_marks_authority && marks.is_suspended(&acc_balance)?;
+            }
+        }
+
         Ok(ExecutorState {
             params: self.params,
             config: self.config,
             is_special,
+            is_marks_authority,
+            is_suspended_by_marks,
             address: acc_address,
             storage_stat: acc_storage_stat,
             balance: acc_balance,
@@ -236,6 +248,8 @@ pub struct ExecutorState<'a> {
     pub config: &'a ParsedConfig,
 
     pub is_special: bool,
+    pub is_marks_authority: bool,
+    pub is_suspended_by_marks: bool,
 
     pub address: StdAddr,
     pub storage_stat: StorageInfo,
@@ -266,6 +280,8 @@ impl<'a> ExecutorState<'a> {
             params,
             config: config.as_ref(),
             is_special: false,
+            is_marks_authority: false,
+            is_suspended_by_marks: false,
             address: address.clone(),
             storage_stat: Default::default(),
             balance: CurrencyCollection::ZERO,
@@ -290,6 +306,16 @@ impl<'a> ExecutorState<'a> {
         let mut res = Self::new_non_existent(params, config, address);
         res.balance = balance.into();
         res.orig_status = AccountStatus::Uninit;
+
+        if params.authority_marks_enabled
+            && let Some(marks) = &config.as_ref().authority_marks
+        {
+            res.is_marks_authority = marks.is_authority(address);
+            res.is_suspended_by_marks = !res.is_special
+                && !res.is_marks_authority
+                && marks.is_suspended(&res.balance).unwrap();
+        }
+
         res
     }
 
@@ -300,8 +326,7 @@ impl<'a> ExecutorState<'a> {
         balance: impl Into<CurrencyCollection>,
         state_hash: HashBytes,
     ) -> Self {
-        let mut res = Self::new_non_existent(params, config, address);
-        res.balance = balance.into();
+        let mut res = Self::new_uninit(params, config, address, balance);
         res.state = AccountState::Frozen(state_hash);
         res.orig_status = AccountStatus::Frozen;
         res.end_status = AccountStatus::Frozen;
@@ -318,8 +343,7 @@ impl<'a> ExecutorState<'a> {
     ) -> Self {
         use tycho_types::models::StateInit;
 
-        let mut res = Self::new_non_existent(params, config, address);
-        res.balance = balance.into();
+        let mut res = Self::new_uninit(params, config, address, balance);
         res.state = AccountState::Active(StateInit {
             split_depth: None,
             special: None,
@@ -359,6 +383,8 @@ pub struct ExecutorParams {
     pub full_body_in_bounced: bool,
     /// More gas-predictable extra currency behaviour.
     pub strict_extra_currency: bool,
+    /// Whether accounts can be suspended by authority marks.
+    pub authority_marks_enabled: bool,
 }
 
 /// Executed transaction.

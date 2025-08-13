@@ -66,6 +66,13 @@ impl ExecutorState<'_> {
         // Overwrite msg balance.
         let mut msg_value = ctx.received_message.balance_remaining.clone();
 
+        // Authority marks cannot be bounced back.
+        if self.params.authority_marks_enabled
+            && let Some(marks) = &self.config.authority_marks
+        {
+            marks.remove_authority_marks_in(&mut msg_value)?;
+        }
+
         // Compute message storage stats.
         let stats = 'stats: {
             let mut stats = ExtStorageStat::with_limits(StorageStatLimits {
@@ -206,11 +213,17 @@ impl ExecutorState<'_> {
 
 #[cfg(test)]
 mod tests {
-    use tycho_types::models::{IntMsgInfo, StdAddr};
+    use std::collections::BTreeMap;
+
+    use tycho_types::models::{AuthorityMarksConfig, CurrencyCollection, IntMsgInfo, StdAddr};
+    use tycho_types::num::VarUint248;
     use tycho_types::prelude::*;
 
     use super::*;
-    use crate::tests::{make_default_config, make_default_params, make_message};
+    use crate::ExecutorParams;
+    use crate::tests::{
+        make_custom_config, make_default_config, make_default_params, make_message,
+    };
 
     #[test]
     fn bounce_with_enough_funds() {
@@ -290,6 +303,137 @@ mod tests {
         assert_eq!(
             state.balance.tokens,
             prev_balance.tokens - (received_msg.balance_remaining.tokens - gas_fees - action_fine)
+        );
+        assert_eq!(
+            bounced_msg_info.value.tokens,
+            received_msg.balance_remaining.tokens - gas_fees - action_fine - full_fwd_fee
+        );
+        assert!(bounced_msg_info.ihr_disabled);
+        assert!(!bounced_msg_info.bounce);
+        assert!(bounced_msg_info.bounced);
+        assert_eq!(bounced_msg_info.src, dst_addr.clone().into());
+        assert_eq!(bounced_msg_info.dst, src_addr.clone().into());
+        assert_eq!(bounced_msg_info.ihr_fee, Tokens::ZERO);
+        assert_eq!(bounced_msg_info.fwd_fee, bounce_phase.fwd_fees);
+        assert_eq!(bounced_msg_info.created_at, params.block_unixtime);
+        assert_eq!(bounced_msg_info.created_lt, prev_start_lt + 1000 + 2);
+
+        // Root cell is free and the bounced message has no child cells.
+        assert_eq!(bounce_phase.msg_size, StorageUsedShort {
+            bits: Default::default(),
+            cells: Default::default()
+        });
+
+        // End LT must increase.
+        assert_eq!(state.end_lt, prev_start_lt + 1000 + 3);
+    }
+
+    #[test]
+    fn bounce_does_not_return_marks() {
+        let params = ExecutorParams {
+            authority_marks_enabled: true,
+            ..make_default_params()
+        };
+        let config = make_custom_config(|config| {
+            config.set_authority_marks_config(&AuthorityMarksConfig {
+                authority_addresses: BTreeMap::from_iter([(HashBytes::ZERO, ())]).try_into()?,
+                black_mark_id: 100,
+                white_mark_id: 101,
+            })?;
+            Ok(())
+        });
+
+        let src_addr = StdAddr::new(0, HashBytes([123; 32]));
+        let dst_addr = StdAddr::new(-1, HashBytes::ZERO);
+
+        let gas_fees = Tokens::new(100);
+        let action_fine = Tokens::new(200);
+
+        let mut state =
+            ExecutorState::new_uninit(&params, &config, &dst_addr, CurrencyCollection {
+                tokens: Tokens::new(1_000_000_000),
+                other: BTreeMap::from_iter([
+                    (100u32, VarUint248::new(1000)), // more black barks than white
+                    (101u32, VarUint248::new(100)),
+                ])
+                .try_into()
+                .unwrap(),
+            });
+        state.balance.tokens -= gas_fees;
+        state.balance.tokens -= action_fine;
+        let prev_balance = state.balance.clone();
+        let prev_total_fees = state.total_fees;
+        let prev_start_lt = state.start_lt;
+
+        let msg_balance = CurrencyCollection {
+            tokens: Tokens::new(1_000_000_000),
+            other: BTreeMap::from_iter([(100u32, VarUint248::new(1))])
+                .try_into()
+                .unwrap(),
+        };
+        let received_msg = state
+            .receive_in_msg(make_message(
+                IntMsgInfo {
+                    src: src_addr.clone().into(),
+                    dst: dst_addr.clone().into(),
+                    value: msg_balance.clone(),
+                    bounce: true,
+                    created_lt: prev_start_lt + 1000,
+                    ..Default::default()
+                },
+                None,
+                None,
+            ))
+            .unwrap();
+        assert_eq!(state.start_lt, prev_start_lt + 1000 + 1);
+        assert_eq!(state.end_lt, prev_start_lt + 1000 + 2);
+
+        let credit_phase = state.credit_phase(&received_msg).unwrap();
+        assert_eq!(credit_phase.credit, msg_balance);
+
+        let bounce_phase = state
+            .bounce_phase(BouncePhaseContext {
+                gas_fees,
+                action_fine,
+                received_message: &received_msg,
+            })
+            .unwrap();
+
+        let BouncePhase::Executed(bounce_phase) = bounce_phase else {
+            panic!("expected bounce phase to execute")
+        };
+
+        // Only msg fees are collected during the transaction.
+        let full_fwd_fee = Tokens::new(config.mc_fwd_prices.lump_price as _);
+        let collected_fees = config.mc_fwd_prices.get_first_part(full_fwd_fee);
+        assert_eq!(state.total_fees, prev_total_fees + collected_fees);
+        assert_eq!(state.total_fees, prev_total_fees + bounce_phase.msg_fees);
+        assert_eq!(bounce_phase.fwd_fees, full_fwd_fee - collected_fees);
+
+        // There were no extra currencies in the inbound message.
+        assert_eq!(state.out_msgs.len(), 1);
+        let bounced_msg = state.out_msgs.last().unwrap().load().unwrap();
+        assert!(bounced_msg.init.is_none());
+        assert_eq!(bounced_msg.body.0.size_bits(), 32);
+        assert_eq!(
+            CellSlice::apply(&bounced_msg.body)
+                .unwrap()
+                .load_u32()
+                .unwrap(),
+            u32::MAX
+        );
+
+        let MsgInfo::Int(bounced_msg_info) = bounced_msg.info else {
+            panic!("expected bounced internal message");
+        };
+        assert_eq!(
+            state.balance.other,
+            prev_balance.other.checked_add(&msg_balance.other).unwrap()
+        );
+        assert!(bounced_msg_info.value.other.is_empty());
+        assert_eq!(
+            state.balance.tokens,
+            prev_balance.tokens + gas_fees + action_fine
         );
         assert_eq!(
             bounced_msg_info.value.tokens,

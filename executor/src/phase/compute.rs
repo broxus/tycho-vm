@@ -124,6 +124,14 @@ impl ExecutorState<'_> {
             return Ok(res);
         }
 
+        // Skip compute phase for accounts suspended by authority marks.
+        if self.is_suspended_by_marks {
+            res.compute_phase = ComputePhase::Skipped(SkippedComputePhase {
+                reason: ComputePhaseSkipReason::Suspended,
+            });
+            return Ok(res);
+        }
+
         let (msg_balance_remaining, is_external) = match ctx.input.in_msg() {
             Some(msg) => (msg.balance_remaining.clone(), msg.is_external),
             None => (CurrencyCollection::ZERO, false),
@@ -437,12 +445,19 @@ impl ReceivedMessage {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeMap;
+
     use tycho_asm_macros::tvmasm;
-    use tycho_types::models::{ExtInMsgInfo, IntMsgInfo, LibDescr, SimpleLib, StdAddr};
-    use tycho_types::num::{VarUint24, VarUint56};
+    use tycho_types::models::{
+        AuthorityMarksConfig, ExtInMsgInfo, IntMsgInfo, LibDescr, SimpleLib, StdAddr,
+    };
+    use tycho_types::num::{VarUint24, VarUint56, VarUint248};
 
     use super::*;
-    use crate::tests::{make_default_config, make_default_params, make_message};
+    use crate::ExecutorParams;
+    use crate::tests::{
+        make_custom_config, make_default_config, make_default_params, make_message,
+    };
 
     const STUB_ADDR: StdAddr = StdAddr::new(0, HashBytes::ZERO);
     const OK_BALANCE: Tokens = Tokens::new(1_000_000_000);
@@ -789,6 +804,154 @@ mod tests {
         );
         assert_eq!(compute_phase.exit_arg, None);
         assert_eq!(compute_phase.vm_steps, 12); // accept, throw
+
+        Ok(())
+    }
+
+    #[test]
+    fn suspended_account_skips_compute() -> Result<()> {
+        let params = ExecutorParams {
+            authority_marks_enabled: true,
+            ..make_default_params()
+        };
+
+        let config = make_custom_config(|config| {
+            config.set_authority_marks_config(&AuthorityMarksConfig {
+                authority_addresses: Dict::new(),
+                black_mark_id: 100,
+                white_mark_id: 101,
+            })?;
+            Ok(())
+        });
+
+        let mut state = ExecutorState::new_active(
+            &params,
+            &config,
+            &STUB_ADDR,
+            CurrencyCollection {
+                tokens: OK_BALANCE,
+                other: BTreeMap::from_iter([
+                    (100u32, VarUint248::new(500)), // blocked by black marks
+                ])
+                .try_into()?,
+            },
+            CellBuilder::build_from(u32::MIN)?,
+            tvmasm!("ACCEPT"),
+        );
+
+        let msg = state.receive_in_msg(empty_int_msg(&STUB_ADDR, OK_BALANCE))?;
+        state.credit_phase(&msg)?;
+
+        let prev_balance = state.balance.clone();
+        let prev_state = state.state.clone();
+        let prev_total_fees = state.total_fees;
+        let prev_end_status = state.end_status;
+
+        let compute_phase = state.compute_phase(ComputePhaseContext {
+            input: TransactionInput::Ordinary(&msg),
+            storage_fee: Tokens::ZERO,
+            force_accept: false,
+            inspector: None,
+        })?;
+
+        // Message must not be accepted.
+        assert!(!compute_phase.accepted);
+        // State must not change.
+        assert_eq!(state.state, prev_state);
+        // Status must not change.
+        assert_eq!(prev_end_status, state.end_status);
+        // No actions must be produced.
+        assert_eq!(compute_phase.actions, Cell::empty_cell());
+        // No fees must be paid when message was not accepted.
+        assert_eq!(state.total_fees, prev_total_fees);
+        assert_eq!(state.balance, prev_balance);
+
+        let ComputePhase::Skipped(compute_phase) = compute_phase.compute_phase else {
+            panic!("expected skipped compute phase");
+        };
+        assert_eq!(compute_phase.reason, ComputePhaseSkipReason::Suspended);
+
+        Ok(())
+    }
+
+    #[test]
+    fn cant_suspend_authority_address() -> Result<()> {
+        let params = ExecutorParams {
+            authority_marks_enabled: true,
+            ..make_default_params()
+        };
+        let config = make_custom_config(|config| {
+            config.set_authority_marks_config(&AuthorityMarksConfig {
+                authority_addresses: Dict::try_from_btree(&BTreeMap::from_iter([(
+                    HashBytes::ZERO,
+                    (),
+                )]))?,
+                black_mark_id: 100,
+                white_mark_id: 101,
+            })?;
+            Ok(())
+        });
+
+        let mut state = ExecutorState::new_active(
+            &params,
+            &config,
+            &StdAddr::new(-1, HashBytes::ZERO),
+            CurrencyCollection {
+                tokens: OK_BALANCE,
+                other: BTreeMap::from_iter([
+                    (100u32, VarUint248::new(1000)), // more black barks than white
+                    (101u32, VarUint248::new(100)),
+                ])
+                .try_into()?,
+            },
+            Cell::default(),
+            tvmasm!("ACCEPT"),
+        );
+
+        let msg = state.receive_in_msg(empty_ext_in_msg(&state.address))?;
+
+        let prev_balance = state.balance.clone();
+        let prev_state = state.state.clone();
+        let prev_total_fees = state.total_fees;
+        let prev_end_status = state.end_status;
+
+        let compute_phase = state.compute_phase(ComputePhaseContext {
+            input: TransactionInput::Ordinary(&msg),
+            storage_fee: Tokens::ZERO,
+            force_accept: false,
+            inspector: None,
+        })?;
+
+        // Original balance must be correct.
+        assert_eq!(prev_balance, compute_phase.original_balance);
+        // Message must be accepted.
+        assert!(compute_phase.accepted);
+        // State must not change.
+        assert_eq!(state.state, prev_state);
+        // Status must not change.
+        assert_eq!(prev_end_status, state.end_status);
+        // No actions must be produced.
+        assert_eq!(compute_phase.actions, Cell::empty_cell());
+        // Fees must be paid.
+        let expected_gas_fee = Tokens::new(config.mc_gas_prices.flat_gas_price as _);
+        assert_eq!(state.total_fees, prev_total_fees + expected_gas_fee);
+        assert_eq!(state.balance.other, prev_balance.other);
+        assert_eq!(state.balance.tokens, prev_balance.tokens - expected_gas_fee);
+
+        let ComputePhase::Executed(compute_phase) = compute_phase.compute_phase else {
+            panic!("expected executed compute phase");
+        };
+
+        assert!(compute_phase.success);
+        assert!(!compute_phase.msg_state_used);
+        assert!(!compute_phase.account_activated);
+        assert_eq!(compute_phase.gas_fees, expected_gas_fee);
+        assert_eq!(compute_phase.gas_used, 31);
+        assert_eq!(compute_phase.gas_limit, VarUint56::ZERO);
+        assert_eq!(compute_phase.gas_credit, Some(VarUint24::new(10_000)));
+        assert_eq!(compute_phase.exit_code, 0);
+        assert_eq!(compute_phase.exit_arg, None);
+        assert_eq!(compute_phase.vm_steps, 2);
 
         Ok(())
     }
