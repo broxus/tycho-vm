@@ -1,9 +1,10 @@
-use ahash::{HashMap, HashSet};
+use ahash::{HashMap, HashSet, HashSetExt};
 use anyhow::Result;
 use tycho_types::error::Error;
 use tycho_types::models::{
-    BlockchainConfig, BlockchainConfigParams, BurningConfig, GasLimitsPrices, GlobalVersion,
-    MsgForwardPrices, SizeLimitsConfig, StdAddr, StorageInfo, StoragePrices, WorkchainDescription,
+    BlockchainConfig, BlockchainConfigParams, BurningConfig, CurrencyCollection, GasLimitsPrices,
+    GlobalVersion, MsgForwardPrices, SizeLimitsConfig, StdAddr, StorageInfo, StoragePrices,
+    WorkchainDescription,
 };
 use tycho_types::num::Tokens;
 use tycho_types::prelude::*;
@@ -24,6 +25,7 @@ pub struct ParsedConfig {
     pub global: GlobalVersion,
     pub workchains: HashMap<i32, WorkchainDescription>,
     pub special_accounts: HashSet<HashBytes>,
+    pub authority_marks: Option<ParsedAuthorityMarksConfig>,
     pub raw: BlockchainConfig,
     pub unpacked: UnpackedConfig,
 }
@@ -96,6 +98,21 @@ impl ParsedConfig {
             special_accounts.insert(addr?);
         }
 
+        let authority_marks = match config.params.get_authority_marks_config() {
+            Ok(params_raw) => {
+                let mut authority_accounts = HashSet::<HashBytes>::new();
+                for addr in params_raw.authority_addresses.keys() {
+                    authority_accounts.insert(addr?);
+                }
+                Some(ParsedAuthorityMarksConfig {
+                    authority_accounts,
+                    black_mark_id: params_raw.black_mark_id,
+                    white_mark_id: params_raw.white_mark_id,
+                })
+            }
+            _ => None,
+        };
+
         Ok(Self {
             blackhole_addr: burning.blackhole_addr,
             mc_gas_prices: mc_gas_prices_raw.parse::<GasLimitsPrices>()?,
@@ -111,6 +128,7 @@ impl ParsedConfig {
             global,
             workchains,
             special_accounts,
+            authority_marks,
             raw: config,
             unpacked: UnpackedConfig {
                 latest_storage_prices,
@@ -326,5 +344,61 @@ fn gas_bought_for(prices: &GasLimitsPrices, balance: &Tokens) -> u64 {
     match res.try_into() {
         Ok(limit) => limit,
         Err(_) => u64::MAX,
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct ParsedAuthorityMarksConfig {
+    pub authority_accounts: HashSet<HashBytes>,
+    pub black_mark_id: u32,
+    pub white_mark_id: u32,
+}
+
+impl ParsedAuthorityMarksConfig {
+    pub fn is_authority(&self, addr: &StdAddr) -> bool {
+        addr.is_masterchain() && self.authority_accounts.contains(&addr.address)
+    }
+
+    /// Returns whether the account was suspended by authority marks.
+    pub fn is_suspended(&self, balance: &CurrencyCollection) -> Result<bool, Error> {
+        let cc = balance.other.as_dict();
+        let Some(black_marks) = cc.get(self.black_mark_id)? else {
+            // No black marks means definitely not suspended.
+            return Ok(false);
+        };
+        let white_marks = cc.get(self.white_mark_id)?.unwrap_or_default();
+
+        Ok(black_marks > white_marks)
+    }
+
+    /// Returns whether the specified balance contained non-zero amounts
+    /// of either black or white marks.
+    pub fn has_authority_marks_in(&self, balance: &CurrencyCollection) -> Result<bool, Error> {
+        let cc = balance.other.as_dict();
+
+        // TODO: Can we just check the existance of currencies here?
+        for mark_id in [self.black_mark_id, self.white_mark_id] {
+            if matches!(cc.get(mark_id)?, Some(x) if !x.is_zero()) {
+                return Ok(true);
+            }
+        }
+        Ok(false)
+    }
+
+    /// Removes authority mark currencies from the specified balance.
+    /// Returns whether the balance has changed.
+    pub fn remove_authority_marks_in(
+        &self,
+        balance: &mut CurrencyCollection,
+    ) -> Result<bool, Error> {
+        let mut changed = false;
+
+        let cc = balance.other.as_dict_mut();
+        for mark_id in [self.black_mark_id, self.white_mark_id] {
+            cc.remove_raw(mark_id)?;
+            changed = true;
+        }
+
+        Ok(changed)
     }
 }

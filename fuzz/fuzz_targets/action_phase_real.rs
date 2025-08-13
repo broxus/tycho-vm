@@ -39,6 +39,8 @@ fuzz_target!(|input: Input| {
         params: &params,
         config: config.as_ref(),
         is_special: false,
+        is_marks_authority: false,
+        is_suspended_by_marks: false,
         address: StdAddr::new(if input.is_masterchain { -1 } else { 0 }, HashBytes::ZERO),
         storage_stat: Default::default(),
         balance,
