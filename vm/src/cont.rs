@@ -371,6 +371,13 @@ impl<T: Cont + 'static> StackValue for T {
 /// Continuation.
 pub type RcCont = SafeRc<dyn Cont>;
 
+impl<'a> Load<'a> for RcCont {
+    #[inline]
+    fn load_from(slice: &mut CellSlice<'a>) -> Result<Self, Error> {
+        load_cont(slice)
+    }
+}
+
 impl dyn Cont {
     pub fn has_c0(&self) -> bool {
         if let Some(control) = self.get_control_data() {
