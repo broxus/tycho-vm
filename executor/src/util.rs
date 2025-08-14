@@ -187,7 +187,7 @@ pub fn check_rewrite_src_addr(my_addr: &StdAddr, addr: &mut Option<IntAddr>) -> 
     }
 }
 
-pub fn check_authority_address(my_addr: &StdAddr, special_addresses: &HashSet<HashBytes>) -> bool {
+pub fn check_authority_account(my_addr: &StdAddr, special_addresses: &HashSet<HashBytes>) -> bool {
     my_addr.is_masterchain() && special_addresses.contains(&my_addr.address)
 }
 
