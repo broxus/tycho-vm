@@ -10,8 +10,8 @@ use tycho_vm::{SafeRc, SmcInfoBase, Stack, Tuple, UnpackedInMsgSmcInfo, VmState,
 
 use crate::phase::receive::{MsgStateInit, ReceivedMessage};
 use crate::util::{
-    StateLimitsResult, check_state_limits_diff, new_varuint24_truncate, new_varuint56_truncate,
-    unlikely,
+    StateLimitsResult, check_authority_account, check_state_limits_diff, new_varuint24_truncate,
+    new_varuint56_truncate, unlikely,
 };
 use crate::{ExecutorInspector, ExecutorState};
 
@@ -122,6 +122,33 @@ impl ExecutorState<'_> {
                 reason: ComputePhaseSkipReason::NoGas,
             });
             return Ok(res);
+        }
+
+        // check if account suspended by black mark
+        if self.params.account_suspension_allowed {
+            if let Some(authority_params) = &self.config.authority_params {
+                let is_authority_account =
+                    check_authority_account(&self.address, &authority_params.authority_accounts);
+
+                if !is_authority_account {
+                    let extra_currencies = self.balance.other.as_dict();
+
+                    let white_mark_balance = extra_currencies
+                        .get(authority_params.white_mark_id)?
+                        .unwrap_or_default();
+
+                    let black_mark_balance = extra_currencies
+                        .get(authority_params.black_mark_id)?
+                        .unwrap_or_default();
+
+                    if black_mark_balance > white_mark_balance {
+                        res.compute_phase = ComputePhase::Skipped(SkippedComputePhase {
+                            reason: ComputePhaseSkipReason::Suspended,
+                        });
+                        return Ok(res);
+                    }
+                }
+            }
         }
 
         let (msg_balance_remaining, is_external) = match ctx.input.in_msg() {
@@ -437,12 +464,18 @@ impl ReceivedMessage {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeMap;
+
     use tycho_asm_macros::tvmasm;
-    use tycho_types::models::{ExtInMsgInfo, IntMsgInfo, LibDescr, SimpleLib, StdAddr};
-    use tycho_types::num::{VarUint24, VarUint56};
+    use tycho_types::models::{
+        AuthorityParams, ExtInMsgInfo, IntMsgInfo, LibDescr, SimpleLib, StdAddr,
+    };
+    use tycho_types::num::{VarUint24, VarUint56, VarUint248};
 
     use super::*;
-    use crate::tests::{make_default_config, make_default_params, make_message};
+    use crate::tests::{
+        make_custom_config, make_default_config, make_default_params, make_message,
+    };
 
     const STUB_ADDR: StdAddr = StdAddr::new(0, HashBytes::ZERO);
     const OK_BALANCE: Tokens = Tokens::new(1_000_000_000);
@@ -789,6 +822,75 @@ mod tests {
         );
         assert_eq!(compute_phase.exit_arg, None);
         assert_eq!(compute_phase.vm_steps, 12); // accept, throw
+
+        Ok(())
+    }
+
+    #[test]
+    fn suspended_account() -> Result<()> {
+        let mut params = make_default_params();
+        params.account_suspension_allowed = true;
+
+        let config = make_custom_config(|config| {
+            let mut dict = Dict::<HashBytes, ()>::new();
+            dict.set(&HashBytes::default(), ())?;
+
+            config.set_authority_params(AuthorityParams {
+                authority_addresses: dict,
+                black_mark_id: 100,
+                white_mark_id: 101,
+            })?;
+            Ok(())
+        });
+
+        let mut state = ExecutorState::new_active(
+            &params,
+            &config,
+            &STUB_ADDR,
+            CurrencyCollection {
+                tokens: OK_BALANCE,
+                other: BTreeMap::from_iter([
+                    (100u32, VarUint248::new(500)), // white and black marks
+                ])
+                .try_into()?,
+            },
+            CellBuilder::build_from(u32::MIN)?,
+            tvmasm!("ACCEPT"),
+        );
+
+        let msg = state.receive_in_msg(empty_ext_in_msg(&state.address))?;
+
+        let prev_balance = state.balance.clone();
+        let prev_state = state.state.clone();
+        let prev_total_fees = state.total_fees;
+        let prev_end_status = state.end_status;
+
+        let compute_phase = state.compute_phase(ComputePhaseContext {
+            input: TransactionInput::Ordinary(&msg),
+            storage_fee: Tokens::ZERO,
+            force_accept: false,
+            inspector: None,
+        })?;
+
+        // Original balance must be correct.
+        assert_eq!(prev_balance, compute_phase.original_balance);
+
+        // Message must not be accepted.
+        assert!(!compute_phase.accepted);
+        // State must not change.
+        assert_eq!(state.state, prev_state);
+        // Status must not change.
+        assert_eq!(prev_end_status, state.end_status);
+        // No actions must be produced.
+        assert_eq!(compute_phase.actions, Cell::empty_cell());
+        // No fees must be paid when message was not accepted.
+        assert_eq!(state.total_fees, prev_total_fees);
+        assert_eq!(state.balance, prev_balance);
+
+        let ComputePhase::Skipped(compute_phase) = compute_phase.compute_phase else {
+            panic!("expected skipped compute phase");
+        };
+        assert_eq!(compute_phase.reason, ComputePhaseSkipReason::Suspended);
 
         Ok(())
     }

@@ -10,10 +10,11 @@ use tycho_types::models::{
 use tycho_types::num::{Tokens, VarUint56};
 use tycho_types::prelude::*;
 
+use crate::config::ParsedAuthorityParams;
 use crate::phase::receive::ReceivedMessage;
 use crate::util::{
-    ExtStorageStat, StateLimitsResult, StorageStatLimits, check_rewrite_dst_addr,
-    check_rewrite_src_addr, check_state_limits, check_state_limits_diff,
+    ExtStorageStat, StateLimitsResult, StorageStatLimits, check_authority_account,
+    check_rewrite_dst_addr, check_rewrite_src_addr, check_state_limits, check_state_limits_diff,
 };
 use crate::{ExecutorInspector, ExecutorState, PublicLibraryChange};
 
@@ -172,6 +173,7 @@ impl ExecutorState<'_> {
             out_msgs: Vec::new(),
             delete_account: false,
             public_libs_diff: ctx.inspector.is_some().then(Vec::new),
+            authority_params: self.config.authority_params.clone(),
             compute_phase: ctx.compute_phase,
             action_phase: &mut res.action_phase,
         };
@@ -611,6 +613,24 @@ impl ExecutorState<'_> {
                     return check_skip_invalid(ResultCode::TooManyExtraCurrencies, ctx);
                 }
 
+                // Check if account is allowed to send specific extra currencies
+                if self.params.account_suspension_allowed {
+                    if let Some(ac) = &ctx.authority_params {
+                        let is_authorized_account =
+                            check_authority_account(&self.address, &ac.authority_accounts);
+                        if !is_authorized_account {
+                            let extra_currencies = info.value.other.as_dict();
+
+                            let has_white_mark = extra_currencies.contains_key(ac.white_mark_id)?;
+                            let has_black_mark = extra_currencies.contains_key(ac.black_mark_id)?;
+
+                            if has_white_mark || has_black_mark {
+                                return check_skip_invalid(ResultCode::NotEnoughExtraBalance, ctx);
+                            }
+                        }
+                    }
+                }
+
                 // Try to withdraw extra currencies from the remaining balance.
                 let other = match ctx.remaining_balance.other.checked_sub(&info.value.other) {
                     Ok(other) => other,
@@ -924,6 +944,8 @@ struct ActionContext<'a> {
     delete_account: bool,
     public_libs_diff: Option<Vec<PublicLibraryChange>>,
 
+    authority_params: Option<ParsedAuthorityParams>,
+
     compute_phase: &'a ExecutedComputePhase,
     action_phase: &'a mut ActionPhase,
 }
@@ -960,14 +982,30 @@ impl ActionContext<'_> {
         fees_total: Tokens,
     ) -> Result<Tokens, ActionFailed> {
         // Update `value` based on flags.
+
+        fn remove_system_currencies(
+            params: &ParsedAuthorityParams,
+            account_balance: &CurrencyCollection,
+        ) -> Result<CurrencyCollection> {
+            let mut value = account_balance.clone();
+            let dict = value.other.as_dict_mut();
+            dict.remove(params.black_mark_id)?;
+            dict.remove(params.white_mark_id)?;
+            Ok(value)
+        }
+
         if mode.contains(SendMsgFlags::ALL_BALANCE) {
             // Attach all remaining balance to the message.
             if self.strict_extra_currency {
                 // Attach only native balance when strict behaviour is enabled.
                 value.tokens = self.remaining_balance.tokens;
             } else {
-                // Attach both native and extra currencies otherwise.
-                *value = self.remaining_balance.clone();
+                // Attach both native and extra currencies otherwise except system currencies.
+                if let Some(ctx) = &self.authority_params {
+                    *value = remove_system_currencies(ctx, &self.remaining_balance)?;
+                } else {
+                    *value = self.remaining_balance.clone();
+                }
             };
             // Pay fees from the attached value.
             mode.remove(SendMsgFlags::PAY_FEE_SEPARATELY);
@@ -979,8 +1017,14 @@ impl ActionContext<'_> {
                     // Attach only native balance when strict behaviour is enabled.
                     value.try_add_assign_tokens(msg.balance_remaining.tokens)?;
                 } else {
-                    // Attach both native and extra currencies otherwise.
-                    value.try_add_assign(&msg.balance_remaining)?;
+                    // Attach both native and extra currencies except system currencies otherwise.
+                    if let Some(ctx) = &self.authority_params {
+                        let remaining_balance =
+                            remove_system_currencies(ctx, &self.remaining_balance)?;
+                        value.try_add_assign(&remaining_balance)?;
+                    } else {
+                        value.try_add_assign(&self.remaining_balance)?;
+                    }
                 }
             }
 
@@ -1223,14 +1267,14 @@ mod tests {
     use tycho_asm_macros::tvmasm;
     use tycho_types::merkle::MerkleProof;
     use tycho_types::models::{
-        Anycast, IntAddr, MessageLayout, MsgInfo, RelaxedIntMsgInfo, RelaxedMessage, StdAddr,
-        VarAddr,
+        Anycast, AuthorityParams, IntAddr, MessageLayout, MsgInfo, RelaxedIntMsgInfo,
+        RelaxedMessage, StdAddr, VarAddr,
     };
     use tycho_types::num::{Uint9, VarUint248};
 
     use super::*;
     use crate::ExecutorParams;
-    use crate::tests::{make_default_config, make_default_params};
+    use crate::tests::{make_custom_config, make_default_config, make_default_params};
 
     const STUB_ADDR: StdAddr = StdAddr::new(0, HashBytes::ZERO);
     const OK_BALANCE: Tokens = Tokens::new(1_000_000_000);
@@ -2117,6 +2161,232 @@ mod tests {
 
         assert_eq!(state.total_fees, prev_total_fees + expected_first_frac);
         assert_eq!(state.balance, expected_balance);
+        Ok(())
+    }
+
+    #[test]
+    fn send_message_all_balance_with_mark_tokens() -> Result<()> {
+        let mut params = make_default_params();
+        params.strict_extra_currency = false;
+
+        let config = make_custom_config(|config| {
+            let mut dict = Dict::<HashBytes, ()>::new();
+            dict.set(&HashBytes::default(), ())?;
+
+            config.set_authority_params(AuthorityParams {
+                authority_addresses: dict,
+                black_mark_id: 100,
+                white_mark_id: 101,
+            })?;
+            Ok(())
+        });
+
+        let orig_data = CellBuilder::build_from(u32::MIN)?;
+
+        let mut state = ExecutorState::new_active(
+            &params,
+            &config,
+            &STUB_ADDR,
+            CurrencyCollection {
+                tokens: OK_BALANCE,
+                other: BTreeMap::from_iter([
+                    (100u32, VarUint248::new(500)), // white and black marks + some extra currency
+                    (101u32, VarUint248::new(500)),
+                    (200u32, VarUint248::new(500)),
+                ])
+                .try_into()?,
+            },
+            orig_data,
+            tvmasm!("ACCEPT"),
+        );
+
+        let compute_phase = stub_compute_phase(OK_GAS);
+
+        let prev_end_lt = state.end_lt;
+
+        let actions = make_action_list([OutAction::SendMsg {
+            mode: SendMsgFlags::ALL_BALANCE,
+            out_msg: make_relaxed_message(
+                RelaxedIntMsgInfo {
+                    dst: STUB_ADDR.into(),
+                    value: CurrencyCollection {
+                        tokens: Tokens::new(100_000_000),
+                        other: ExtraCurrencyCollection::new(),
+                    },
+                    ..Default::default()
+                },
+                None,
+                None,
+            ),
+        }]);
+
+        let ActionPhaseFull {
+            action_phase,
+            action_fine,
+            state_exceeds_limits,
+            bounce,
+        } = state.action_phase(ActionPhaseContext {
+            received_message: None,
+            original_balance: original_balance(&state, &compute_phase),
+            new_state: StateInit::default(),
+            actions: actions.clone(),
+            compute_phase: &compute_phase,
+            inspector: None,
+        })?;
+
+        assert!(action_phase.success);
+        assert!(action_phase.valid);
+        assert_eq!(action_phase.result_code, 0);
+        assert_eq!(action_phase.messages_created, 1);
+        assert_eq!(action_phase.total_actions, 1);
+        assert_eq!(action_fine, Tokens::ZERO);
+        assert!(!state_exceeds_limits);
+        assert!(!bounce);
+
+        assert_eq!(state.out_msgs.len(), 1);
+        assert_eq!(state.end_lt, prev_end_lt + 1);
+
+        assert_eq!(state.balance.tokens, Tokens::ZERO);
+        assert!(!state.balance.other.is_empty());
+        assert!(state.balance.other.as_dict().contains_key(100u32)?);
+        assert!(state.balance.other.as_dict().contains_key(101u32)?);
+        assert!(!state.balance.other.as_dict().contains_key(200u32)?);
+
+        Ok(())
+    }
+
+    #[test]
+    fn cant_send_system_tokens() -> Result<()> {
+        let mut params = make_default_params();
+        params.account_suspension_allowed = true;
+
+        let config = make_custom_config(|config| {
+            let mut dict = Dict::<HashBytes, ()>::new();
+            dict.set(&HashBytes::default(), ())?;
+
+            config.set_authority_params(AuthorityParams {
+                authority_addresses: dict,
+                black_mark_id: 100,
+                white_mark_id: 100,
+            })?;
+            Ok(())
+        });
+
+        let orig_data = CellBuilder::build_from(u32::MIN)?;
+
+        let mut state = ExecutorState::new_active(
+            &params,
+            &config,
+            &STUB_ADDR,
+            CurrencyCollection {
+                tokens: OK_BALANCE,
+                other: BTreeMap::from_iter([
+                    (100u32, VarUint248::new(500)), // white and black marks
+                    (101u32, VarUint248::new(500)),
+                ])
+                .try_into()?,
+            },
+            orig_data,
+            tvmasm!("ACCEPT"),
+        );
+
+        let compute_phase = stub_compute_phase(OK_GAS);
+        let prev_balance = state.balance.clone();
+        let prev_total_fees = state.total_fees;
+        let prev_end_lt = state.end_lt;
+
+        // check send of black mark token. Should exit with NotEnoughExtraBalance error
+        let actions_black = make_action_list([OutAction::SendMsg {
+            mode: SendMsgFlags::empty(),
+            out_msg: make_relaxed_message(
+                RelaxedIntMsgInfo {
+                    dst: STUB_ADDR.into(),
+                    value: CurrencyCollection {
+                        tokens: Tokens::new(100_000_000),
+                        other: BTreeMap::from_iter([(100u32, VarUint248::new(10))]).try_into()?,
+                    },
+                    ..Default::default()
+                },
+                None,
+                None,
+            ),
+        }]);
+
+        let ActionPhaseFull {
+            action_phase: action_phase_black,
+            action_fine: action_fine_black,
+            state_exceeds_limits: state_exceeds_limits_black,
+            bounce: bounce_black,
+        } = state.action_phase(ActionPhaseContext {
+            received_message: None,
+            original_balance: original_balance(&state, &compute_phase),
+            new_state: StateInit::default(),
+            actions: actions_black.clone(),
+            compute_phase: &compute_phase,
+            inspector: None,
+        })?;
+
+        assert_eq!(action_phase_black, ActionPhase {
+            success: false,
+            valid: true,
+            no_funds: true,
+            result_code: ResultCode::NotEnoughExtraBalance as i32,
+            result_arg: Some(0),
+            total_actions: 1,
+            action_list_hash: *actions_black.repr_hash(),
+            ..empty_action_phase()
+        });
+
+        assert_eq!(action_fine_black, Tokens::ZERO);
+        assert!(!state_exceeds_limits_black);
+        assert!(!bounce_black);
+
+        assert_eq!(state.total_fees, prev_total_fees);
+        assert_eq!(state.balance, prev_balance);
+        assert_eq!(state.end_lt, prev_end_lt);
+        assert!(state.out_msgs.is_empty());
+
+        // now let's send native token. should be successful
+        let actions_normal = make_action_list([OutAction::SendMsg {
+            mode: SendMsgFlags::empty(),
+            out_msg: make_relaxed_message(
+                RelaxedIntMsgInfo {
+                    dst: STUB_ADDR.into(),
+                    value: CurrencyCollection {
+                        tokens: Tokens::new(100_000_000),
+                        other: ExtraCurrencyCollection::new(),
+                    },
+                    ..Default::default()
+                },
+                None,
+                None,
+            ),
+        }]);
+
+        let ActionPhaseFull {
+            action_phase: action_phase_normal,
+            action_fine: action_fine_normal,
+            state_exceeds_limits: state_exceeds_limits_normal,
+            bounce: bounce_normal,
+        } = state.action_phase(ActionPhaseContext {
+            received_message: None,
+            original_balance: original_balance(&state, &compute_phase),
+            new_state: StateInit::default(),
+            actions: actions_normal.clone(),
+            compute_phase: &compute_phase,
+            inspector: None,
+        })?;
+
+        assert!(action_phase_normal.success);
+        assert!(action_phase_normal.valid);
+        assert_eq!(action_phase_normal.result_code, 0);
+        assert_eq!(action_phase_normal.messages_created, 1);
+        assert_eq!(action_fine_normal, Tokens::ZERO);
+        assert!(!state_exceeds_limits_normal);
+        assert!(!bounce_normal);
+
+        assert_eq!(state.out_msgs.len(), 1);
+
         Ok(())
     }
 

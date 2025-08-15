@@ -359,6 +359,8 @@ pub struct ExecutorParams {
     pub full_body_in_bounced: bool,
     /// More gas-predictable extra currency behaviour.
     pub strict_extra_currency: bool,
+    /// Ability to suspend accounts by special extra currencies
+    pub account_suspension_allowed: bool,
 }
 
 /// Executed transaction.
@@ -778,6 +780,7 @@ mod tests {
         ExecutorParams {
             block_unixtime: 1738799198,
             full_body_in_bounced: false,
+            account_suspension_allowed: false,
             strict_extra_currency: true,
             vm_modifiers: tycho_vm::BehaviourModifiers {
                 chksig_always_succeed: true,
