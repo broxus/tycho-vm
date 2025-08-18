@@ -40,5 +40,5 @@ tycho-asm-macros = "0.1.1"
 tycho-crypto = "0.4.0"
 tycho-types = { version = "0.2.0", default-features = false, features = ["bigint"] }
 
-tycho-vm = { version = "0.2.0", path = "./vm" }
-tycho-vm-proc = { version = "0.2.0", path = "./vm-proc" }
+tycho-vm = { version = "0.2.1", path = "./vm" }
+tycho-vm-proc = { version = "0.2.1", path = "./vm-proc" }
