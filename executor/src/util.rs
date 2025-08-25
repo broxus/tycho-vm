@@ -248,19 +248,17 @@ pub fn check_rewrite_dst_addr(
     }
 
     // Rewrite if needed.
-    if can_rewrite {
-        if let IntAddr::Var(var) = addr {
-            debug_assert!(STD_WORKCHAINS.contains(&var.workchain));
-            debug_assert_eq!(var.address_len.into_inner(), STD_ADDR_LEN);
+    if can_rewrite && let IntAddr::Var(var) = addr {
+        debug_assert!(STD_WORKCHAINS.contains(&var.workchain));
+        debug_assert_eq!(var.address_len.into_inner(), STD_ADDR_LEN);
 
-            // Copy high address bytes into the target address.
-            let len = std::cmp::min(var.address.len(), 32);
-            let mut address = [0; 32];
-            address[..len].copy_from_slice(&var.address[..len]);
+        // Copy high address bytes into the target address.
+        let len = std::cmp::min(var.address.len(), 32);
+        let mut address = [0; 32];
+        address[..len].copy_from_slice(&var.address[..len]);
 
-            // Set type as `addr_std`.
-            *addr = IntAddr::Std(StdAddr::new(var.workchain as i8, HashBytes(address)));
-        }
+        // Set type as `addr_std`.
+        *addr = IntAddr::Std(StdAddr::new(var.workchain as i8, HashBytes(address)));
     }
 
     // Done
@@ -323,22 +321,22 @@ pub fn check_state_limits(
         cell_count: limits.max_acc_state_cells,
     });
 
-    if let Some(code) = code {
-        if !stats.add_cell(code.clone()) {
-            return StateLimitsResult::Exceeds;
-        }
+    if let Some(code) = code
+        && !stats.add_cell(code.clone())
+    {
+        return StateLimitsResult::Exceeds;
     }
 
-    if let Some(data) = data {
-        if !stats.add_cell(data.clone()) {
-            return StateLimitsResult::Exceeds;
-        }
+    if let Some(data) = data
+        && !stats.add_cell(data.clone())
+    {
+        return StateLimitsResult::Exceeds;
     }
 
-    if let Some(libs) = libs.root() {
-        if !stats.add_cell(libs.clone()) {
-            return StateLimitsResult::Exceeds;
-        }
+    if let Some(libs) = libs.root()
+        && !stats.add_cell(libs.clone())
+    {
+        return StateLimitsResult::Exceeds;
     }
 
     // Check public libraries (only for masterchain, because in other workchains all

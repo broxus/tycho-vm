@@ -307,10 +307,11 @@ impl Stack {
 
     pub fn pop_smallint_range(&mut self, min: u32, max: u32) -> VmResult<u32> {
         let item = self.pop_int()?;
-        if let Some(item) = item.to_u32() {
-            if item >= min && item <= max {
-                return Ok(item);
-            }
+        if let Some(item) = item.to_u32()
+            && item >= min
+            && item <= max
+        {
+            return Ok(item);
         }
         vm_bail!(IntegerOutOfRange {
             min: min as isize,
@@ -321,10 +322,11 @@ impl Stack {
 
     pub fn pop_long_range(&mut self, min: u64, max: u64) -> VmResult<u64> {
         let item = self.pop_int()?;
-        if let Some(item) = item.to_u64() {
-            if item >= min && item <= max {
-                return Ok(item);
-            }
+        if let Some(item) = item.to_u64()
+            && item >= min
+            && item <= max
+        {
+            return Ok(item);
         }
         vm_bail!(IntegerOutOfRange {
             min: min as isize,
@@ -458,10 +460,11 @@ impl Stack {
 }
 
 fn into_signed_range(item: SafeRc<BigInt>, min: i32, max: i32) -> VmResult<i32> {
-    if let Some(item) = item.to_i32() {
-        if item >= min && item <= max {
-            return Ok(item);
-        }
+    if let Some(item) = item.to_i32()
+        && item >= min
+        && item <= max
+    {
+        return Ok(item);
     }
     vm_bail!(IntegerOutOfRange {
         min: min as isize,
@@ -1298,10 +1301,11 @@ impl StackValue for Tuple {
         for item in self {
             std::mem::swap(&mut head, &mut tail);
 
-            if tail.is_some() && head.is_some() {
-                if let (Some(t), Some(h)) = (tail.take(), head.take()) {
-                    head = Some(ok!(CellBuilder::build_from_ext((t, h), context)));
-                }
+            if tail.is_some()
+                && head.is_some()
+                && let (Some(t), Some(h)) = (tail.take(), head.take())
+            {
+                head = Some(ok!(CellBuilder::build_from_ext((t, h), context)));
             }
 
             let mut builder = CellBuilder::new();

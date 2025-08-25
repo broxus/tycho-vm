@@ -227,11 +227,11 @@ fn process_instr_definition(
             opcode_bits += symbol_bits;
             opcode_base_min |= c;
         } else {
-            if let Some((last, last_bits)) = args.last_mut() {
-                if *last == c {
-                    *last_bits += symbol_bits;
-                    continue;
-                }
+            if let Some((last, last_bits)) = args.last_mut()
+                && *last == c
+            {
+                *last_bits += symbol_bits;
+                continue;
             }
 
             args.push((c, symbol_bits));
@@ -400,13 +400,12 @@ fn process_instr_definition(
         #[allow(clippy::never_loop)] // fixes clippy false-positive
         for function_arg in function.sig.inputs.iter().skip(1) {
             let ty;
-            let name = 'function_arg: {
-                if let syn::FnArg::Typed(input) = function_arg {
-                    if let syn::Pat::Ident(pat) = &*input.pat {
-                        ty = &input.ty;
-                        break 'function_arg pat.ident.to_string();
-                    }
-                }
+            let name = if let syn::FnArg::Typed(input) = function_arg
+                && let syn::Pat::Ident(pat) = &*input.pat
+            {
+                ty = &input.ty;
+                pat.ident.to_string()
+            } else {
                 return Err(Error::custom("Unsupported argument binding").with_span(&function_arg));
             };
 
@@ -724,19 +723,19 @@ impl Opcodes {
         assert!(range.aligned_opcode_min < range.aligned_opcode_max);
         assert!(range.aligned_opcode_max <= MAX_OPCODE);
 
-        if let Some((other_min, other)) = self.opcodes.range(range.aligned_opcode_min..).next() {
-            if range.aligned_opcode_max > *other_min {
-                let shift = MAX_OPCODE_BITS - other.total_bits as usize;
-                let other_min = other.aligned_opcode_min >> shift;
-                let other_max = other.aligned_opcode_max >> shift;
-                let n = other.total_bits as usize / 4;
+        if let Some((other_min, other)) = self.opcodes.range(range.aligned_opcode_min..).next()
+            && range.aligned_opcode_max > *other_min
+        {
+            let shift = MAX_OPCODE_BITS - other.total_bits as usize;
+            let other_min = other.aligned_opcode_min >> shift;
+            let other_max = other.aligned_opcode_max >> shift;
+            let n = other.total_bits as usize / 4;
 
-                return Err(Error::custom(format!(
-                    "Opcode overlaps with the start of the range of another opcode: \
+            return Err(Error::custom(format!(
+                "Opcode overlaps with the start of the range of another opcode: \
                     {other_min:0n$x}..{other_max:0n$x}"
-                ))
-                .with_span(&range.span));
-            }
+            ))
+            .with_span(&range.span));
         }
 
         if let Some((k, prev)) = self.opcodes.range(..=range.aligned_opcode_min).next_back() {

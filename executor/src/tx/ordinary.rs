@@ -94,27 +94,27 @@ impl ExecutorState<'_> {
         let mut destroyed = false;
 
         let mut action_phase = None;
-        if let ComputePhase::Executed(compute_phase) = &compute_phase {
-            if compute_phase.success {
-                let res = self
-                    .action_phase(ActionPhaseContext {
-                        received_message: Some(&mut msg),
-                        original_balance,
-                        new_state,
-                        actions,
-                        compute_phase,
-                        inspector,
-                    })
-                    .context("action phase failed")?;
+        if let ComputePhase::Executed(compute_phase) = &compute_phase
+            && compute_phase.success
+        {
+            let res = self
+                .action_phase(ActionPhaseContext {
+                    received_message: Some(&mut msg),
+                    original_balance,
+                    new_state,
+                    actions,
+                    compute_phase,
+                    inspector,
+                })
+                .context("action phase failed")?;
 
-                aborted = !res.action_phase.success;
-                state_exceeds_limits = res.state_exceeds_limits;
-                bounce_required = res.bounce;
-                action_fine = res.action_fine;
-                destroyed = self.end_status == AccountStatus::NotExists;
+            aborted = !res.action_phase.success;
+            state_exceeds_limits = res.state_exceeds_limits;
+            bounce_required = res.bounce;
+            action_fine = res.action_fine;
+            destroyed = self.end_status == AccountStatus::NotExists;
 
-                action_phase = Some(res.action_phase);
-            }
+            action_phase = Some(res.action_phase);
         }
 
         // Run bounce phase for internal messages if something failed.

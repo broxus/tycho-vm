@@ -349,10 +349,10 @@ impl<'a> VmState<'a> {
 
             if self.parent.is_none() {
                 #[cfg(feature = "tracing")]
-                if self.modifiers.log_mask.contains(VmLogMask::DUMP_C5) {
-                    if let Some(committed) = &self.committed_state {
-                        vm_log_c5!(committed.c5.as_ref());
-                    }
+                if self.modifiers.log_mask.contains(VmLogMask::DUMP_C5)
+                    && let Some(committed) = &self.committed_state
+                {
+                    vm_log_c5!(committed.c5.as_ref());
                 }
                 break res;
             }
@@ -413,18 +413,17 @@ impl<'a> VmState<'a> {
     }
 
     pub fn try_commit(&mut self) -> bool {
-        if let (Some(c4), Some(c5)) = (&self.cr.d[0], &self.cr.d[1]) {
-            if c4.level() == 0
-                && c5.level() == 0
-                && c4.repr_depth() <= Self::MAX_DATA_DEPTH
-                && c5.repr_depth() <= Self::MAX_DATA_DEPTH
-            {
-                self.committed_state = Some(CommittedState {
-                    c4: c4.clone(),
-                    c5: c5.clone(),
-                });
-                return true;
-            }
+        if let (Some(c4), Some(c5)) = (&self.cr.d[0], &self.cr.d[1])
+            && c4.level() == 0
+            && c5.level() == 0
+            && c4.repr_depth() <= Self::MAX_DATA_DEPTH
+            && c5.repr_depth() <= Self::MAX_DATA_DEPTH
+        {
+            self.committed_state = Some(CommittedState {
+                c4: c4.clone(),
+                c5: c5.clone(),
+            });
+            return true;
         }
 
         false
@@ -708,11 +707,11 @@ impl<'a> VmState<'a> {
     }
 
     pub fn jump(&mut self, cont: RcCont) -> VmResult<i32> {
-        if let Some(cont_data) = cont.get_control_data() {
-            if cont_data.stack.is_some() || cont_data.nargs.is_some() {
-                // Cont has a non-empty stack or expects a fixed number of arguments
-                return self.jump_ext(cont, None);
-            }
+        if let Some(cont_data) = cont.get_control_data()
+            && (cont_data.stack.is_some() || cont_data.nargs.is_some())
+        {
+            // Cont has a non-empty stack or expects a fixed number of arguments
+            return self.jump_ext(cont, None);
         }
 
         // The simplest continuation case:
@@ -832,11 +831,11 @@ impl<'a> VmState<'a> {
                 self.gas.try_consume(1)?;
             }
 
-            if let Some(cont_data) = cont.get_control_data() {
-                if cont_data.stack.is_some() || cont_data.nargs.is_some() {
-                    // Cont has a non-empty stack or expects a fixed number of arguments
-                    cont = ok!(self.adjust_jump_cont(cont, None));
-                }
+            if let Some(cont_data) = cont.get_control_data()
+                && (cont_data.stack.is_some() || cont_data.nargs.is_some())
+            {
+                // Cont has a non-empty stack or expects a fixed number of arguments
+                cont = ok!(self.adjust_jump_cont(cont, None));
             }
         }
 

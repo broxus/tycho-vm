@@ -321,10 +321,10 @@ impl StackOps {
         let x = ok!(stack.pop_smallint_range(0, max_stack_size(st.version)));
 
         if x > 0 && y > 0 {
-            if should_consume_gas(st.version) {
-                if let Some(diff) = (x as u64 + y as u64).checked_sub(STACK_FEE_THRESHOLD as _) {
-                    st.gas.try_consume(diff)?;
-                }
+            if should_consume_gas(st.version)
+                && let Some(diff) = (x as u64 + y as u64).checked_sub(STACK_FEE_THRESHOLD as _)
+            {
+                st.gas.try_consume(diff)?;
             }
 
             ok!(stack.reverse_range(y as _, x as _));

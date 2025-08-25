@@ -1,7 +1,7 @@
 [workspace.package]
 edition = "2024"
 authors = ["Rexagon <i.kalinin@dexpa.io>", "MrWad3r <s.eliseev@dexpa.io>"]
-rust-version = "1.85.0"
+rust-version = "1.88.0"
 repository = "https://github.com/broxus/tycho-vm"
 license = "MIT OR Apache-2.0"
 

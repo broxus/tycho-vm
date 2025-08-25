@@ -47,23 +47,23 @@ impl ExecutorState<'_> {
         let mut aborted = true;
         let mut destroyed = false;
         let mut action_phase = None;
-        if let ComputePhase::Executed(compute_phase) = &compute_phase {
-            if compute_phase.success {
-                let res = self
-                    .action_phase(ActionPhaseContext {
-                        received_message: None,
-                        original_balance,
-                        new_state,
-                        actions,
-                        compute_phase,
-                        inspector,
-                    })
-                    .context("action phase failed")?;
+        if let ComputePhase::Executed(compute_phase) = &compute_phase
+            && compute_phase.success
+        {
+            let res = self
+                .action_phase(ActionPhaseContext {
+                    received_message: None,
+                    original_balance,
+                    new_state,
+                    actions,
+                    compute_phase,
+                    inspector,
+                })
+                .context("action phase failed")?;
 
-                aborted = !res.action_phase.success;
-                destroyed = self.end_status == AccountStatus::NotExists;
-                action_phase = Some(res.action_phase);
-            }
+            aborted = !res.action_phase.success;
+            destroyed = self.end_status == AccountStatus::NotExists;
+            action_phase = Some(res.action_phase);
         }
 
         // Build transaction info.

@@ -126,12 +126,12 @@ impl ExecutorState<'_> {
 
             // Try to parse one action.
             let mut cs_parsed = cs;
-            if let Ok(item) = OutAction::load_from(&mut cs_parsed) {
-                if cs_parsed.is_empty() {
-                    // Add this action if slices contained it exclusively.
-                    parsed_list.push(Some(item));
-                    continue;
-                }
+            if let Ok(item) = OutAction::load_from(&mut cs_parsed)
+                && cs_parsed.is_empty()
+            {
+                // Add this action if slices contained it exclusively.
+                parsed_list.push(Some(item));
+                continue;
             }
 
             // Special brhaviour for `SendMsg` action when we can at least parse its flags.
@@ -410,12 +410,13 @@ impl ExecutorState<'_> {
         }
 
         let rewritten_body_cs;
-        if let Some(MessageRewrite::BodyToCell) = rewrite {
-            if body_cs.size_bits() > 1 && !body_cs.get_bit(0).unwrap() {
-                // Try to move a non-empty plain body to cell.
-                rewritten_body_cs = rewrite_body_to_cell(body_cs);
-                body_cs = rewritten_body_cs.as_full_slice();
-            }
+        if let Some(MessageRewrite::BodyToCell) = rewrite
+            && body_cs.size_bits() > 1
+            && !body_cs.get_bit(0).unwrap()
+        {
+            // Try to move a non-empty plain body to cell.
+            rewritten_body_cs = rewrite_body_to_cell(body_cs);
+            body_cs = rewritten_body_cs.as_full_slice();
         }
 
         // Check info.
@@ -493,31 +494,30 @@ impl ExecutorState<'_> {
             fine_per_cell = (prices.cell_price >> 16) / 4;
 
             let mut funds = ctx.remaining_balance.tokens;
-            if let RelaxedMsgInfo::Int(info) = &relaxed_info {
-                if !mode.contains(SendMsgFlags::ALL_BALANCE)
-                    && !mode.contains(SendMsgFlags::PAY_FEE_SEPARATELY)
+            if let RelaxedMsgInfo::Int(info) = &relaxed_info
+                && !mode.contains(SendMsgFlags::ALL_BALANCE)
+                && !mode.contains(SendMsgFlags::PAY_FEE_SEPARATELY)
+            {
+                let mut new_funds = info.value.tokens;
+
+                if mode.contains(SendMsgFlags::WITH_REMAINING_BALANCE)
+                    && (|| {
+                        let msg_balance_remaining = match &ctx.received_message {
+                            Some(msg) => msg.balance_remaining.tokens,
+                            None => Tokens::ZERO,
+                        };
+                        new_funds.try_add_assign(msg_balance_remaining)?;
+                        new_funds.try_sub_assign(ctx.compute_phase.gas_fees)?;
+                        new_funds.try_sub_assign(*ctx.action_fine)?;
+
+                        Ok::<_, tycho_types::error::Error>(())
+                    })()
+                    .is_err()
                 {
-                    let mut new_funds = info.value.tokens;
-
-                    if mode.contains(SendMsgFlags::WITH_REMAINING_BALANCE)
-                        && (|| {
-                            let msg_balance_remaining = match &ctx.received_message {
-                                Some(msg) => msg.balance_remaining.tokens,
-                                None => Tokens::ZERO,
-                            };
-                            new_funds.try_add_assign(msg_balance_remaining)?;
-                            new_funds.try_sub_assign(ctx.compute_phase.gas_fees)?;
-                            new_funds.try_sub_assign(*ctx.action_fine)?;
-
-                            Ok::<_, tycho_types::error::Error>(())
-                        })()
-                        .is_err()
-                    {
-                        return check_skip_invalid(ResultCode::NotEnoughBalance, ctx);
-                    }
-
-                    funds = std::cmp::min(funds, new_funds);
+                    return check_skip_invalid(ResultCode::NotEnoughBalance, ctx);
                 }
+
+                funds = std::cmp::min(funds, new_funds);
             }
 
             if funds < Tokens::new(max_cell_count as u128 * fine_per_cell as u128) {
@@ -558,14 +558,12 @@ impl ExecutorState<'_> {
                 }
 
                 // Add EC dict when `strict` behaviour is disabled.
-                if !self.params.strict_extra_currency {
-                    if let RelaxedMsgInfo::Int(int) = &relaxed_info {
-                        if let Some(cell) = int.value.other.as_dict().root() {
-                            if !stats.add_cell(cell.as_ref()) {
-                                break 'valid;
-                            }
-                        }
-                    }
+                if !self.params.strict_extra_currency
+                    && let RelaxedMsgInfo::Int(int) = &relaxed_info
+                    && let Some(cell) = int.value.other.as_dict().root()
+                    && !stats.add_cell(cell.as_ref())
+                {
+                    break 'valid;
                 }
 
                 break 'stats stats.stats();
@@ -640,17 +638,16 @@ impl ExecutorState<'_> {
                 };
 
                 // Clear message balance if it was used.
-                if let Some(msg) = &mut ctx.received_message {
-                    if mode.contains(SendMsgFlags::ALL_BALANCE)
-                        || mode.contains(SendMsgFlags::WITH_REMAINING_BALANCE)
-                    {
-                        if self.params.strict_extra_currency {
-                            // Only native balance was used.
-                            msg.balance_remaining.tokens = Tokens::ZERO;
-                        } else {
-                            // All balance was used.
-                            msg.balance_remaining = CurrencyCollection::ZERO;
-                        }
+                if let Some(msg) = &mut ctx.received_message
+                    && (mode.contains(SendMsgFlags::ALL_BALANCE)
+                        || mode.contains(SendMsgFlags::WITH_REMAINING_BALANCE))
+                {
+                    if self.params.strict_extra_currency {
+                        // Only native balance was used.
+                        msg.balance_remaining.tokens = Tokens::ZERO;
+                    } else {
+                        // All balance was used.
+                        msg.balance_remaining = CurrencyCollection::ZERO;
                     }
                 }
 
@@ -1313,11 +1310,11 @@ mod tests {
         let msg = 'cell: {
             if params.strict_extra_currency {
                 let mut parsed = msg.load().unwrap();
-                if let MsgInfo::Int(int) = &mut parsed.info {
-                    if !int.value.other.is_empty() {
-                        int.value.other = ExtraCurrencyCollection::new();
-                        break 'cell CellBuilder::build_from(parsed).unwrap();
-                    }
+                if let MsgInfo::Int(int) = &mut parsed.info
+                    && !int.value.other.is_empty()
+                {
+                    int.value.other = ExtraCurrencyCollection::new();
+                    break 'cell CellBuilder::build_from(parsed).unwrap();
                 }
             }
             msg.inner().clone()

@@ -83,17 +83,17 @@ impl ExecutorState<'_> {
             // Root cell is free, but all children must be accounted.
             'valid: {
                 // Msg value can contain some cells.
-                if let Some(extra_currencies) = msg_value.other.as_dict().root() {
-                    if !stats.add_cell(extra_currencies.as_ref()) {
-                        break 'valid;
-                    }
+                if let Some(extra_currencies) = msg_value.other.as_dict().root()
+                    && !stats.add_cell(extra_currencies.as_ref())
+                {
+                    break 'valid;
                 }
 
                 // We must also include a msg body if `params.full_body_in_bounce` is enabled.
-                if let Some(body) = &full_body {
-                    if !stats.add_cell(body.as_ref()) {
-                        break 'valid;
-                    }
+                if let Some(body) = &full_body
+                    && !stats.add_cell(body.as_ref())
+                {
+                    break 'valid;
                 }
 
                 // Exit this block with a valid storage stats info.

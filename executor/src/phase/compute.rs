@@ -342,15 +342,15 @@ impl ExecutorState<'_> {
             self.end_status = AccountStatus::Active;
         }
 
-        if let Some(committed) = vm.committed_state {
-            if res.accepted {
-                res.new_state.data = Some(committed.c4);
-                res.actions = committed.c5;
+        if let Some(committed) = vm.committed_state
+            && res.accepted
+        {
+            res.new_state.data = Some(committed.c4);
+            res.actions = committed.c5;
 
-                // Set inspector actions.
-                if let Some(actions) = inspector_actions {
-                    *actions = Some(res.actions.clone());
-                }
+            // Set inspector actions.
+            if let Some(actions) = inspector_actions {
+                *actions = Some(res.actions.clone());
             }
         }
 

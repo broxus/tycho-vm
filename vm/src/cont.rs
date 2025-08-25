@@ -245,10 +245,10 @@ impl ControlRegs {
         rhs: &Option<SafeRc<T>>,
     ) {
         if let Some(rhs) = rhs {
-            if let Some(lhs) = lhs {
-                if SafeRc::ptr_eq(lhs, rhs) {
-                    return;
-                }
+            if let Some(lhs) = lhs
+                && SafeRc::ptr_eq(lhs, rhs)
+            {
+                return;
             }
             *lhs = Some(rhs.clone())
         }

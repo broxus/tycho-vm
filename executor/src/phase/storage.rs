@@ -152,10 +152,11 @@ impl ExecutorState<'_> {
         }
 
         // Adjust message value.
-        if let Some(msg) = ctx.received_message {
-            if ctx.adjust_msg_balance && msg.balance_remaining.tokens > self.balance.tokens {
-                msg.balance_remaining.tokens = self.balance.tokens;
-            }
+        if ctx.adjust_msg_balance
+            && let Some(msg) = ctx.received_message
+            && msg.balance_remaining.tokens > self.balance.tokens
+        {
+            msg.balance_remaining.tokens = self.balance.tokens;
         }
 
         // Add fees.

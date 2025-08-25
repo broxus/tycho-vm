@@ -304,16 +304,15 @@ impl MessageOps {
         update_fees(stats, &mut fwd_fee, &mut ihr_fee);
 
         // Adjust layout for state init.
-        if let Some(init) = &msg.init {
-            if !msg_layout.init_to_cell
-                && (ok!(compute_msg_root_bits(&msg_layout, fwd_fee, ihr_fee)) > cell::MAX_BIT_LEN
-                    || compute_msg_root_refs(&msg_layout) > cell::MAX_REF_COUNT)
-            {
-                msg_layout.init_to_cell = true;
-                stats.bit_count += init.bit_len() as u64;
-                stats.cell_count += 1;
-                update_fees(stats, &mut fwd_fee, &mut ihr_fee);
-            }
+        if let Some(init) = &msg.init
+            && !msg_layout.init_to_cell
+            && (ok!(compute_msg_root_bits(&msg_layout, fwd_fee, ihr_fee)) > cell::MAX_BIT_LEN
+                || compute_msg_root_refs(&msg_layout) > cell::MAX_REF_COUNT)
+        {
+            msg_layout.init_to_cell = true;
+            stats.bit_count += init.bit_len() as u64;
+            stats.cell_count += 1;
+            update_fees(stats, &mut fwd_fee, &mut ihr_fee);
         }
 
         // Adjust layout for body.

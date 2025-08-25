@@ -1085,10 +1085,10 @@ impl ContOps {
     #[op(code = "f2d$0nnn#nn", fmt = "THROWIF {n}", args(mode = ThrowMode::Cond(true)))]
     #[op(code = "f2e$0nnn#nn", fmt = "THROWIFNOT {n}", args(mode = ThrowMode::Cond(false)))]
     fn exec_throw_fixed(st: &mut VmState, n: u32, mode: ThrowMode) -> VmResult<i32> {
-        if let ThrowMode::Cond(cond) = mode {
-            if ok!(SafeRc::make_mut(&mut st.stack).pop_bool()) != cond {
-                return Ok(0);
-            }
+        if let ThrowMode::Cond(cond) = mode
+            && ok!(SafeRc::make_mut(&mut st.stack).pop_bool()) != cond
+        {
+            return Ok(0);
         }
 
         st.throw_exception(n as i32)
@@ -1100,11 +1100,11 @@ impl ContOps {
     fn exec_throw_arg_fixed(st: &mut VmState, n: u32, mode: ThrowMode) -> VmResult<i32> {
         let stack = SafeRc::make_mut(&mut st.stack);
 
-        if let ThrowMode::Cond(cond) = mode {
-            if ok!(stack.pop_bool()) != cond {
-                ok!(stack.pop());
-                return Ok(0);
-            }
+        if let ThrowMode::Cond(cond) = mode
+            && ok!(stack.pop_bool()) != cond
+        {
+            ok!(stack.pop());
+            return Ok(0);
         }
 
         let arg = ok!(stack.pop());

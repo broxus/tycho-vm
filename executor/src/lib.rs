@@ -144,10 +144,10 @@ impl<'a> Executor<'a> {
         match account {
             Some(acc) => {
                 acc_address = 'addr: {
-                    if let IntAddr::Std(acc_addr) = acc.address {
-                        if acc_addr == *address {
-                            break 'addr acc_addr;
-                        }
+                    if let IntAddr::Std(acc_addr) = acc.address
+                        && acc_addr == *address
+                    {
+                        break 'addr acc_addr;
                     }
                     anyhow::bail!("account address mismatch");
                 };
@@ -176,12 +176,12 @@ impl<'a> Executor<'a> {
 
         let mut is_marks_authority = false;
         let mut is_suspended_by_marks = false;
-        if self.params.authority_marks_enabled {
-            if let Some(marks) = &self.config.authority_marks {
-                is_marks_authority = marks.is_authority(address);
-                is_suspended_by_marks =
-                    !is_special && !is_marks_authority && marks.is_suspended(&acc_balance)?;
-            }
+        if self.params.authority_marks_enabled
+            && let Some(marks) = &self.config.authority_marks
+        {
+            is_marks_authority = marks.is_authority(address);
+            is_suspended_by_marks =
+                !is_special && !is_marks_authority && marks.is_suspended(&acc_balance)?;
         }
 
         Ok(ExecutorState {
