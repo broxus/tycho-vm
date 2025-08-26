@@ -296,10 +296,12 @@ impl ExecutorState<'_> {
         let mut inspector_actions = None;
         let mut inspector_exit_code = None;
         let mut inspector_total_gas_used = None;
+        let mut missing_library = None;
         if let Some(inspector) = ctx.inspector {
             inspector_actions = Some(&mut inspector.actions);
             inspector_exit_code = Some(&mut inspector.exit_code);
             inspector_total_gas_used = Some(&mut inspector.total_gas_used);
+            missing_library = Some(&mut inspector.missing_library);
             if let Some(debug) = inspector.debug.as_deref_mut() {
                 vm.debug = Some(debug);
             }
@@ -354,6 +356,10 @@ impl ExecutorState<'_> {
             }
         }
 
+        if let Some(missing_library) = missing_library {
+            *missing_library = vm.gas.missing_library();
+        }
+
         self.balance.try_sub_assign_tokens(gas_fees)?;
         self.total_fees.try_add_assign(gas_fees)?;
 
@@ -378,6 +384,7 @@ impl ExecutorState<'_> {
             vm_init_state_hash: HashBytes::ZERO,
             vm_final_state_hash: HashBytes::ZERO,
         });
+
         Ok(res)
     }
 

@@ -218,6 +218,8 @@ pub struct ExecutorInspector<'e> {
     pub public_libs_diff: Vec<PublicLibraryChange>,
     /// Compute phase exit code.
     pub exit_code: Option<i32>,
+    /// Hash of the library in case it was missing during execution.
+    pub missing_library: Option<HashBytes>,
     /// Total gas consumed (including the remaining "free" gas
     /// and everything that exceeds the limit).
     pub total_gas_used: u64,
