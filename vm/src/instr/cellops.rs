@@ -1676,7 +1676,7 @@ fn exec_store_int_common(stack: &mut Stack, bits: u16, args: StoreIntArgs) -> Vm
         match x.to_u64() {
             Some(value) => builder.store_uint(value, bits)?,
             None => {
-                let int = if bits % 8 != 0 {
+                let int = if !bits.is_multiple_of(8) {
                     let align = 8 - bits % 8;
                     Cow::Owned((*x).clone() << align)
                 } else {
@@ -2939,7 +2939,7 @@ mod tests {
                         } else {
                             BigInt::from_bytes_be(Sign::Plus, buffer)
                         };
-                        if bits % 8 != 0 {
+                        if !bits.is_multiple_of(8) {
                             int >>= 8 - rem;
                         }
                         int

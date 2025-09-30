@@ -144,7 +144,7 @@ impl std::fmt::Display for DisplaySliceString<'_> {
 
         match (|bytes| {
             let bit_len = self.0.size_bits();
-            if bit_len > MAX_BIT_LEN || bit_len % 8 != 0 {
+            if bit_len > MAX_BIT_LEN || !bit_len.is_multiple_of(8) {
                 return None;
             }
 
