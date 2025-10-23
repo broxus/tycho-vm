@@ -3,9 +3,9 @@ use tycho_types::cell::Lazy;
 use tycho_types::dict;
 use tycho_types::error::Error;
 use tycho_types::models::{
-    Account, AccountState, AccountStatus, CurrencyCollection, HashUpdate, IntAddr, LibDescr,
-    Message, OwnedMessage, ShardAccount, SimpleLib, StdAddr, StorageInfo, StorageUsed, TickTock,
-    Transaction, TxInfo,
+    Account, AccountState, AccountStatus, BlockId, CurrencyCollection, HashUpdate, IntAddr,
+    LibDescr, Message, OwnedMessage, ShardAccount, SimpleLib, StdAddr, StorageInfo, StorageUsed,
+    TickTock, Transaction, TxInfo,
 };
 use tycho_types::num::{Tokens, Uint15};
 use tycho_types::prelude::*;
@@ -370,6 +370,8 @@ pub struct ExecutorParams {
     pub block_unixtime: u32,
     /// Logical time of the block.
     pub block_lt: u64,
+    /// Last known previous masterchain block before current.
+    pub prev_mc_block_id: Option<BlockId>,
     /// VM behaviour modifiers.
     pub vm_modifiers: tycho_vm::BehaviourModifiers,
     /// Prevent [`Frozen`] accounts from being deleted

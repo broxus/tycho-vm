@@ -1,7 +1,7 @@
 use anyhow::Result;
 use num_bigint::{BigInt, Sign};
 use tycho_types::models::{
-    AccountState, AccountStatus, ComputePhase, ComputePhaseSkipReason, CurrencyCollection,
+    AccountState, AccountStatus, BlockId, ComputePhase, ComputePhaseSkipReason, CurrencyCollection,
     ExecutedComputePhase, IntAddr, IntMsgInfo, MsgType, SkippedComputePhase, StateInit, TickTock,
 };
 use tycho_types::num::Tokens;
@@ -263,6 +263,13 @@ impl ExecutorState<'_> {
 
         let code = res.new_state.code.clone();
 
+        let prev_blocks = self
+            .params
+            .prev_mc_block_id
+            .as_ref()
+            .map(make_prev_blocks_tuple)
+            .unwrap_or_default();
+
         let smc_info = SmcInfoBase::new()
             .with_now(self.params.block_unixtime)
             .with_block_lt(self.params.block_lt)
@@ -274,6 +281,7 @@ impl ExecutorState<'_> {
             .require_ton_v4()
             .with_code(code.clone().unwrap_or_default())
             .with_message_balance(msg_balance_remaining.clone())
+            .with_prev_blocks_info(prev_blocks)
             .with_storage_fees(ctx.storage_fee)
             .require_ton_v6()
             .with_unpacked_config(self.config.unpacked.as_tuple())
@@ -448,6 +456,28 @@ impl ReceivedMessage {
         };
         Ok(Some(unpacked.into_tuple()))
     }
+}
+
+fn make_prev_blocks_tuple(prev_mc_block_id: &BlockId) -> SafeRc<tycho_vm::Tuple> {
+    SafeRc::new(tuple![
+        // last_mc_blocks:[BlockId...]
+        [
+            // Only the previous is used for now
+            raw block_id_to_tuple(prev_mc_block_id),
+        ]
+        // TODO: prev_key_block:BlockId
+        // TODO: last_mc_blocks_100[BlockId...]
+    ])
+}
+
+fn block_id_to_tuple(block_id: &BlockId) -> SafeRc<tycho_vm::Tuple> {
+    SafeRc::new(tuple![
+        int block_id.shard.workchain(),
+        int block_id.shard.prefix(),
+        int block_id.seqno,
+        int block_id.root_hash.as_bigint(),
+        int block_id.file_hash.as_bigint(),
+    ])
 }
 
 #[cfg(test)]

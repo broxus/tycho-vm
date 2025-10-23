@@ -463,7 +463,7 @@ mod test {
     use tycho_types::prelude::*;
     use tycho_vm::smc_info::SmcInfoTonV11;
 
-    use crate::{OwnedCellSlice, RcStackValue, SafeRc, SmcInfoBase, Stack, VmState};
+    use crate::{OwnedCellSlice, RcStackValue, SafeRc, SmcInfoBase, Stack, Tuple, VmState};
 
     #[test]
     #[traced_test]
@@ -582,6 +582,29 @@ mod test {
         assert_run_vm!("INMSG_VALUEEXTRA", c7: c7.clone(), [] => [null]);
         assert_run_vm!("INMSG_STATEINIT", c7: c7.clone(), [] => [cell state_init]);
 
+        Ok(())
+    }
+
+    #[test]
+    #[traced_test]
+    pub fn prev_mc_block_test() -> anyhow::Result<()> {
+        let prev_mc_block_tuple = tuple![
+            int -1,
+            int 123,
+            int 456,
+            int 1357,
+            int 2456,
+        ] as Tuple;
+
+        let prev_blocks = tuple![raw RcStackValue::from(prev_mc_block_tuple)];
+        let value = SafeRc::new(prev_blocks);
+        let c7 = tuple![[
+            null, null, null, null,
+            null, null, null, null,
+            null, null, null, null, null,
+            [raw value.clone()],                    // 13
+        ]];
+        assert_run_vm!("PREVMCBLOCKS", c7: c7.clone(), [] => [raw value]);
         Ok(())
     }
 
