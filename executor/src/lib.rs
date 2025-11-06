@@ -22,7 +22,9 @@ mod util;
 pub mod phase {
     pub use self::action::{ActionPhaseContext, ActionPhaseFull};
     pub use self::bounce::BouncePhaseContext;
-    pub use self::compute::{ComputePhaseContext, ComputePhaseFull, TransactionInput};
+    pub use self::compute::{
+        ComputePhaseContext, ComputePhaseFull, ComputePhaseSmcInfo, TransactionInput,
+    };
     pub use self::receive::{MsgStateInit, ReceivedMessage};
     pub use self::storage::StoragePhaseContext;
 
@@ -225,6 +227,8 @@ pub struct ExecutorInspector<'e> {
     pub total_gas_used: u64,
     /// Debug output target.
     pub debug: Option<&'e mut dyn std::fmt::Write>,
+    /// Hook for a compute phase to modify C7 register data.
+    pub modify_smc_info: Option<&'e mut ModifySmcInfoFn>,
 }
 
 /// Public library diff operation.
@@ -243,6 +247,9 @@ impl PublicLibraryChange {
         }
     }
 }
+
+/// Hook for a compute phase to modify C7 register data.
+pub type ModifySmcInfoFn = dyn FnMut(&mut phase::ComputePhaseSmcInfo) -> Result<()>;
 
 /// Shared state for executor phases.
 pub struct ExecutorState<'a> {

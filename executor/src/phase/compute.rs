@@ -15,6 +15,9 @@ use crate::util::{
 };
 use crate::{ExecutorInspector, ExecutorState};
 
+/// The exact type of smart contract info used for C7.
+pub type ComputePhaseSmcInfo = tycho_vm::SmcInfoTonV11;
+
 /// Compute phase input context.
 pub struct ComputePhaseContext<'a, 'e> {
     /// Parsed transaction input.
@@ -90,7 +93,10 @@ impl ExecutorState<'_> {
     ///
     /// [`Uninit`]: AccountState::Uninit
     /// [`Frozen`]: AccountState::Frozen
-    pub fn compute_phase(&mut self, ctx: ComputePhaseContext<'_, '_>) -> Result<ComputePhaseFull> {
+    pub fn compute_phase(
+        &mut self,
+        mut ctx: ComputePhaseContext<'_, '_>,
+    ) -> Result<ComputePhaseFull> {
         let is_masterchain = self.address.is_masterchain();
 
         // Compute original balance for the action phase.
@@ -270,7 +276,7 @@ impl ExecutorState<'_> {
             .map(make_prev_blocks_tuple)
             .unwrap_or_default();
 
-        let smc_info = SmcInfoBase::new()
+        let mut smc_info = SmcInfoBase::new()
             .with_now(self.params.block_unixtime)
             .with_block_lt(self.params.block_lt)
             .with_tx_lt(self.start_lt)
@@ -287,6 +293,12 @@ impl ExecutorState<'_> {
             .with_unpacked_config(self.config.unpacked.as_tuple())
             .require_ton_v11()
             .with_unpacked_in_msg(unpacked_in_msg);
+
+        if let Some(inspector) = ctx.inspector.as_deref_mut()
+            && let Some(modify_smc_info) = inspector.modify_smc_info.as_deref_mut()
+        {
+            modify_smc_info(&mut smc_info)?;
+        }
 
         let libraries = (msg_libs, state_libs, &self.params.libraries);
         let mut vm = VmState::builder()
