@@ -21,7 +21,7 @@ mod util;
 
 pub mod phase {
     pub use self::action::{ActionPhaseContext, ActionPhaseFull};
-    pub use self::bounce::BouncePhaseContext;
+    pub use self::bounce::{BounceInfoContext, BouncePhaseContext, BounceReason};
     pub use self::compute::{
         ComputePhaseContext, ComputePhaseFull, ComputePhaseSmcInfo, TransactionInput,
     };

@@ -74,6 +74,8 @@ mod tests {
                 is_external: false,
                 bounce_enabled: false,
                 balance_remaining: msg_balance.clone(),
+                created_lt: None,
+                created_at: None,
             })
             .unwrap();
 

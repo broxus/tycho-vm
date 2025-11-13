@@ -1,12 +1,14 @@
 use anyhow::{Context, anyhow};
-use tycho_types::models::{AccountStatus, ComputePhase, OrdinaryTxInfo};
+use tycho_types::models::{
+    AccountStatus, ComputePhase, ComputePhaseInfo, ComputePhaseSkipReason, OrdinaryTxInfo,
+};
 use tycho_types::num::Tokens;
 use tycho_types::prelude::*;
 
 use crate::error::{TxError, TxResult};
 use crate::phase::{
-    ActionPhaseContext, BouncePhaseContext, ComputePhaseContext, ComputePhaseFull,
-    StoragePhaseContext, TransactionInput,
+    ActionPhaseContext, BounceInfoContext, BouncePhaseContext, BounceReason, ComputePhaseContext,
+    ComputePhaseFull, StoragePhaseContext, TransactionInput,
 };
 use crate::{ExecutorInspector, ExecutorState};
 
@@ -29,6 +31,8 @@ impl ExecutorState<'_> {
             Err(_) if is_external => return Err(TxError::Skipped),
             Err(e) => return Err(TxError::Fatal(e)),
         };
+
+        let mut bounce_info_context = BounceInfoContext::default();
 
         // Order of credit and storage phases depends on the `bounce` flag
         // of the inbound message.
@@ -86,6 +90,30 @@ impl ExecutorState<'_> {
             return Err(TxError::Skipped);
         }
 
+        match &compute_phase {
+            ComputePhase::Executed(phase) => {
+                if !phase.success {
+                    bounce_info_context.compute_phase_info = Some(ComputePhaseInfo {
+                        gas_used: phase.gas_used.into_inner().try_into().unwrap_or(u32::MAX),
+                        vm_steps: phase.vm_steps,
+                    });
+
+                    bounce_info_context.bounce_reason =
+                        BounceReason::ComputePhaseFailed(phase.exit_code)
+                }
+            }
+            ComputePhase::Skipped(skipped) => {
+                let code = match skipped.reason {
+                    ComputePhaseSkipReason::NoState => -1,
+                    ComputePhaseSkipReason::BadState => -2,
+                    ComputePhaseSkipReason::NoGas => -3,
+                    ComputePhaseSkipReason::Suspended => -4,
+                };
+
+                bounce_info_context.bounce_reason = BounceReason::ComputePhaseSkipped(code)
+            }
+        }
+
         // Run action phase only if compute phase succeeded.
         let mut aborted = true;
         let mut state_exceeds_limits = false;
@@ -117,6 +145,12 @@ impl ExecutorState<'_> {
             action_phase = Some(res.action_phase);
         }
 
+        if let Some(a) = &action_phase
+            && !a.success
+        {
+            bounce_info_context.bounce_reason = BounceReason::ActionPhaseFailed(a.result_code)
+        }
+
         // Run bounce phase for internal messages if something failed.
         let mut bounce_phase = None;
         if msg.bounce_enabled
@@ -136,6 +170,7 @@ impl ExecutorState<'_> {
                     gas_fees,
                     action_fine,
                     received_message: &msg,
+                    bounce_info_context,
                 })
                 .context("bounce phase failed")?,
             );

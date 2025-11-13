@@ -126,6 +126,8 @@ impl From<MessageInput> for ReceivedMessage {
             is_external,
             bounce_enabled,
             balance_remaining,
+            created_lt: Some(100),
+            created_at: Some(100),
         }
     }
 }
