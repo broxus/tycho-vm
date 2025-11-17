@@ -429,6 +429,83 @@ mod tests {
     }
 
     #[test]
+    fn should_bounce_full_body_in_new_format() {
+        let params = make_default_params();
+
+        let config = make_default_config();
+
+        let src_addr = StdAddr::new(0, HashBytes([0; 32]));
+        let dst_addr = StdAddr::new(0, HashBytes([1; 32]));
+
+        let gas_fees = Tokens::new(100);
+        let action_fine = Tokens::new(200);
+
+        let mut state =
+            ExecutorState::new_uninit(&params, &config, &dst_addr, Tokens::new(1_000_000_000));
+        state.balance.tokens -= gas_fees;
+        state.balance.tokens -= action_fine;
+
+        let msg_balance = CurrencyCollection {
+            tokens: Tokens::new(1_000_000_000),
+            other: Default::default(),
+        };
+
+        let extra_flags = MessageExtraFlags {
+            enabled: true,
+            full_body_in_bounced: true,
+        };
+
+        let bounce_info_context = BounceInfoContext {
+            compute_phase_info: None,
+            bounce_reason: BounceReason::ComputePhaseSkipped(0),
+        };
+
+        let mut cb = CellBuilder::new();
+        cb.store_reference(CellBuilder::new().build().unwrap())
+            .unwrap();
+        cb.store_u32(322).unwrap();
+
+        let received_msg = state
+            .receive_in_msg(make_message(
+                IntMsgInfo {
+                    src: src_addr.clone().into(),
+                    dst: dst_addr.clone().into(),
+                    value: msg_balance.clone(),
+                    bounce: true,
+                    extra_flags,
+                    created_lt: state.start_lt + 1000,
+                    ..Default::default()
+                },
+                None,
+                Some(cb.clone()),
+            ))
+            .unwrap();
+
+        let bounce_phase = state
+            .bounce_phase(BouncePhaseContext {
+                gas_fees,
+                action_fine,
+                received_message: &received_msg,
+                bounce_info_context,
+            })
+            .unwrap();
+
+        let BouncePhase::Executed(_) = bounce_phase else {
+            panic!("expected bounce phase to execute")
+        };
+        assert_eq!(state.out_msgs.len(), 1);
+        let msg = state.out_msgs.first().unwrap().load().unwrap();
+
+        let mut slice = CellSlice::apply(&msg.body).unwrap();
+        assert_eq!(slice.load_u32().unwrap(), 0xfffffffe);
+        let body = BounceMessageBody::load_from(&mut slice).unwrap();
+        assert_eq!(body.original_body, cb.build().unwrap());
+        assert_eq!(body.bounce_original_info.compute_phase, None);
+        assert_eq!(body.bounce_original_info.bounced_by_phase, 0);
+        assert_eq!(body.bounce_original_info.exit_code, 0);
+    }
+
+    #[test]
     fn bounce_does_not_return_marks() {
         let params = ExecutorParams {
             authority_marks_enabled: true,
