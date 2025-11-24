@@ -27,6 +27,9 @@ impl ExecutorState<'_> {
         let bounce_enabled;
         let mut msg_balance_remaining;
 
+        let mut created_lt = None;
+        let mut created_at = None;
+
         // Process message header.
         let mut slice = msg_root.as_slice_allow_exotic();
         match MsgInfo::load_from(&mut slice)? {
@@ -40,13 +43,16 @@ impl ExecutorState<'_> {
 
                 // Update message balance
                 msg_balance_remaining = info.value;
-                msg_balance_remaining.try_add_assign_tokens(info.ihr_fee)?;
+                // msg_balance_remaining.try_add_assign_tokens(info.ihr_fee)?;
 
                 // Adjust LT range.
                 if info.created_lt >= self.start_lt {
                     self.start_lt = info.created_lt + 1;
                     self.end_lt = self.start_lt + 1;
                 }
+
+                created_lt = Some(info.created_lt);
+                created_at = Some(info.created_at);
             }
             // Handle external (in) message.
             MsgInfo::ExtIn(info) => {
@@ -162,6 +168,8 @@ impl ExecutorState<'_> {
             is_external,
             bounce_enabled,
             balance_remaining: msg_balance_remaining,
+            created_lt,
+            created_at,
         })
     }
 
@@ -195,6 +203,11 @@ pub struct ReceivedMessage {
     /// The remaining attached value of the received message.
     /// NOTE: Always zero for external messages.
     pub balance_remaining: CurrencyCollection,
+
+    /// Created LT for 'In' messages
+    pub created_lt: Option<u64>,
+    /// Created unix timestamp for 'In' messages
+    pub created_at: Option<u32>,
 }
 
 /// Message state init.
@@ -490,7 +503,7 @@ mod tests {
                 IntMsgInfo {
                     dst: STUB_ADDR.into(),
                     value: Tokens::MAX.into(),
-                    ihr_fee: Tokens::MAX,
+                    // ihr_fee: Tokens::MAX,
                     ..Default::default()
                 },
                 None,
@@ -498,6 +511,7 @@ mod tests {
             ))
             .inspect_err(|e| println!("{e}"))
             .unwrap_err();
+        // TODO: this should be ok from v12
     }
 
     #[test]

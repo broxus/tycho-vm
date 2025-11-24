@@ -1,7 +1,9 @@
 use anyhow::Result;
+use tycho_types::boc::Boc;
 use tycho_types::cell::{Cell, CellBuilder, CellFamily, Lazy, Store};
 use tycho_types::models::{
-    BouncePhase, ExecutedBouncePhase, MsgInfo, NoFundsBouncePhase, StorageUsedShort,
+    BounceMessageBody, BounceOriginalInfo, BouncePhase, ComputePhaseInfo, ExecutedBouncePhase,
+    MsgInfo, NoFundsBouncePhase, StorageUsedShort,
 };
 use tycho_types::num::Tokens;
 
@@ -19,6 +21,25 @@ pub struct BouncePhaseContext<'a> {
     pub action_fine: Tokens,
     /// Received message (internal only).
     pub received_message: &'a ReceivedMessage,
+    /// Information collected from previous failed phases
+    pub bounce_info_context: BounceInfoContext,
+}
+
+/// Phase info which is collected to be put into bounced message with TVM v12 format
+#[derive(Default, Clone, Debug)]
+pub struct BounceInfoContext {
+    pub compute_phase_info: Option<ComputePhaseInfo>,
+    pub bounce_reason: BounceReason,
+}
+
+/// Information why is message bounced
+#[derive(Default, Clone, Debug)]
+pub enum BounceReason {
+    #[default]
+    NotBounced,
+    ComputePhaseSkipped(i32),
+    ComputePhaseFailed(i32),
+    ActionPhaseFailed(i32),
 }
 
 impl ExecutorState<'_> {
@@ -52,7 +73,9 @@ impl ExecutorState<'_> {
         }
 
         // Compute additional full body cell.
-        let full_body = if self.params.full_body_in_bounced {
+        let full_body = if self.params.full_body_in_bounced
+            || (int_msg_info.extra_flags.enabled && int_msg_info.extra_flags.full_body_in_bounced)
+        {
             let (range, cell) = &ctx.received_message.body;
             Some(if range.is_full(cell) {
                 cell.clone()
@@ -153,12 +176,61 @@ impl ExecutorState<'_> {
         int_msg_info.bounce = false;
         int_msg_info.bounced = true;
         int_msg_info.value = msg_value;
-        int_msg_info.ihr_fee = Tokens::ZERO;
+        // int_msg_info.extra_flags = Tokens::ZERO;
         int_msg_info.fwd_fee = fwd_fees;
         int_msg_info.created_lt = self.end_lt;
         int_msg_info.created_at = self.params.block_unixtime;
 
-        let msg = {
+        let msg = if int_msg_info.extra_flags.enabled {
+            let mut b = CellBuilder::new();
+            info.store_into(&mut b, Cell::empty_context())?;
+            b.store_bit_zero()?; // init:(Maybe ...)
+
+            let (bounced_by_phase, exit_code) = match ctx.bounce_info_context.bounce_reason {
+                BounceReason::NotBounced => anyhow::bail!("message not bounced"),
+                BounceReason::ComputePhaseSkipped(code) => (0, code),
+                BounceReason::ComputePhaseFailed(code) => (1, code),
+                BounceReason::ActionPhaseFailed(code) => (2, code),
+            };
+
+            let body = BounceMessageBody {
+                original_body: if let Some(full_body) = full_body {
+                    full_body
+                } else {
+                    let mut builder = CellBuilder::new();
+                    let data = ctx
+                        .received_message
+                        .body
+                        .0
+                        .apply(ctx.received_message.body.1.as_ref())?;
+                    builder.store_slice_data(data)?;
+                    builder.build()?
+                },
+                bounce_original_info: BounceOriginalInfo {
+                    value: ctx.received_message.balance_remaining.clone(),
+                    created_lt: ctx.received_message.created_lt.unwrap_or_default(),
+                    created_at: ctx.received_message.created_at.unwrap_or_default(),
+                    bounced_by_phase,
+                    exit_code,
+                    compute_phase: ctx.bounce_info_context.compute_phase_info,
+                },
+            };
+
+            let mut body_builder = CellBuilder::new();
+            body_builder.store_u32(0xfffffffe)?;
+            body.store_into(&mut body_builder, Cell::empty_context())?;
+
+            if b.has_capacity(1 + body_builder.size_bits(), body_builder.size_refs()) {
+                b.store_bit_zero()?;
+                b.store_builder(&body_builder)?;
+            } else {
+                b.store_bit_one()?;
+                b.store_reference(body_builder.build()?)?;
+            }
+
+            // SAFETY: `b` is an ordinary cell.
+            unsafe { Lazy::from_raw_unchecked(b.build()?) }
+        } else {
             const ROOT_BODY_BITS: u16 = 256;
             const BOUNCE_SELECTOR: u32 = u32::MAX;
 
@@ -194,8 +266,11 @@ impl ExecutorState<'_> {
                 b.store_reference(child)?
             }
 
+            let cell = b.build()?;
+            println!("BOC {}", Boc::encode_base64(&cell));
+
             // SAFETY: `b` is an ordinary cell.
-            unsafe { Lazy::from_raw_unchecked(b.build()?) }
+            unsafe { Lazy::from_raw_unchecked(cell) }
         };
 
         // Add message to output.
@@ -215,7 +290,9 @@ impl ExecutorState<'_> {
 mod tests {
     use std::collections::BTreeMap;
 
-    use tycho_types::models::{AuthorityMarksConfig, CurrencyCollection, IntMsgInfo, StdAddr};
+    use tycho_types::models::{
+        AuthorityMarksConfig, CurrencyCollection, IntMsgInfo, MessageExtraFlags, StdAddr,
+    };
     use tycho_types::num::VarUint248;
     use tycho_types::prelude::*;
 
@@ -246,6 +323,16 @@ mod tests {
         let prev_total_fees = state.total_fees;
         let prev_start_lt = state.start_lt;
 
+        let extra_flags = MessageExtraFlags {
+            enabled: true,
+            full_body_in_bounced: false,
+        };
+
+        let bounce_info_context = BounceInfoContext {
+            compute_phase_info: None,
+            bounce_reason: BounceReason::ComputePhaseSkipped(0),
+        };
+
         let received_msg = state
             .receive_in_msg(make_message(
                 IntMsgInfo {
@@ -253,6 +340,7 @@ mod tests {
                     dst: dst_addr.clone().into(),
                     value: Tokens::new(1_000_000_000).into(),
                     bounce: true,
+                    extra_flags,
                     created_lt: prev_start_lt + 1000,
                     ..Default::default()
                 },
@@ -260,6 +348,7 @@ mod tests {
                 None,
             ))
             .unwrap();
+
         assert_eq!(state.start_lt, prev_start_lt + 1000 + 1);
         assert_eq!(state.end_lt, prev_start_lt + 1000 + 2);
 
@@ -268,6 +357,7 @@ mod tests {
                 gas_fees,
                 action_fine,
                 received_message: &received_msg,
+                bounce_info_context,
             })
             .unwrap();
 
@@ -286,14 +376,24 @@ mod tests {
         assert_eq!(state.out_msgs.len(), 1);
         let bounced_msg = state.out_msgs.last().unwrap().load().unwrap();
         assert!(bounced_msg.init.is_none());
-        assert_eq!(bounced_msg.body.0.size_bits(), 32);
-        assert_eq!(
-            CellSlice::apply(&bounced_msg.body)
-                .unwrap()
-                .load_u32()
-                .unwrap(),
-            u32::MAX
-        );
+        if extra_flags.enabled {
+            assert_eq!(
+                CellSlice::apply(&bounced_msg.body)
+                    .unwrap()
+                    .load_u32()
+                    .unwrap(),
+                0xfffffffe
+            );
+        } else {
+            assert_eq!(bounced_msg.body.0.size_bits(), 32);
+            assert_eq!(
+                CellSlice::apply(&bounced_msg.body)
+                    .unwrap()
+                    .load_u32()
+                    .unwrap(),
+                u32::MAX
+            );
+        }
 
         let MsgInfo::Int(bounced_msg_info) = bounced_msg.info else {
             panic!("expected bounced internal message");
@@ -313,7 +413,7 @@ mod tests {
         assert!(bounced_msg_info.bounced);
         assert_eq!(bounced_msg_info.src, dst_addr.clone().into());
         assert_eq!(bounced_msg_info.dst, src_addr.clone().into());
-        assert_eq!(bounced_msg_info.ihr_fee, Tokens::ZERO);
+        assert_eq!(bounced_msg_info.extra_flags, extra_flags);
         assert_eq!(bounced_msg_info.fwd_fee, bounce_phase.fwd_fees);
         assert_eq!(bounced_msg_info.created_at, params.block_unixtime);
         assert_eq!(bounced_msg_info.created_lt, prev_start_lt + 1000 + 2);
@@ -326,6 +426,83 @@ mod tests {
 
         // End LT must increase.
         assert_eq!(state.end_lt, prev_start_lt + 1000 + 3);
+    }
+
+    #[test]
+    fn should_bounce_full_body_in_new_format() {
+        let params = make_default_params();
+
+        let config = make_default_config();
+
+        let src_addr = StdAddr::new(0, HashBytes([0; 32]));
+        let dst_addr = StdAddr::new(0, HashBytes([1; 32]));
+
+        let gas_fees = Tokens::new(100);
+        let action_fine = Tokens::new(200);
+
+        let mut state =
+            ExecutorState::new_uninit(&params, &config, &dst_addr, Tokens::new(1_000_000_000));
+        state.balance.tokens -= gas_fees;
+        state.balance.tokens -= action_fine;
+
+        let msg_balance = CurrencyCollection {
+            tokens: Tokens::new(1_000_000_000),
+            other: Default::default(),
+        };
+
+        let extra_flags = MessageExtraFlags {
+            enabled: true,
+            full_body_in_bounced: true,
+        };
+
+        let bounce_info_context = BounceInfoContext {
+            compute_phase_info: None,
+            bounce_reason: BounceReason::ComputePhaseSkipped(0),
+        };
+
+        let mut cb = CellBuilder::new();
+        cb.store_reference(CellBuilder::new().build().unwrap())
+            .unwrap();
+        cb.store_u32(322).unwrap();
+
+        let received_msg = state
+            .receive_in_msg(make_message(
+                IntMsgInfo {
+                    src: src_addr.clone().into(),
+                    dst: dst_addr.clone().into(),
+                    value: msg_balance.clone(),
+                    bounce: true,
+                    extra_flags,
+                    created_lt: state.start_lt + 1000,
+                    ..Default::default()
+                },
+                None,
+                Some(cb.clone()),
+            ))
+            .unwrap();
+
+        let bounce_phase = state
+            .bounce_phase(BouncePhaseContext {
+                gas_fees,
+                action_fine,
+                received_message: &received_msg,
+                bounce_info_context,
+            })
+            .unwrap();
+
+        let BouncePhase::Executed(_) = bounce_phase else {
+            panic!("expected bounce phase to execute")
+        };
+        assert_eq!(state.out_msgs.len(), 1);
+        let msg = state.out_msgs.first().unwrap().load().unwrap();
+
+        let mut slice = CellSlice::apply(&msg.body).unwrap();
+        assert_eq!(slice.load_u32().unwrap(), 0xfffffffe);
+        let body = BounceMessageBody::load_from(&mut slice).unwrap();
+        assert_eq!(body.original_body, cb.build().unwrap());
+        assert_eq!(body.bounce_original_info.compute_phase, None);
+        assert_eq!(body.bounce_original_info.bounced_by_phase, 0);
+        assert_eq!(body.bounce_original_info.exit_code, 0);
     }
 
     #[test]
@@ -371,6 +548,17 @@ mod tests {
                 .try_into()
                 .unwrap(),
         };
+
+        let extra_flags = MessageExtraFlags {
+            enabled: true,
+            full_body_in_bounced: false,
+        };
+
+        let bounce_info_context = BounceInfoContext {
+            compute_phase_info: None,
+            bounce_reason: BounceReason::ComputePhaseSkipped(0),
+        };
+
         let received_msg = state
             .receive_in_msg(make_message(
                 IntMsgInfo {
@@ -378,6 +566,7 @@ mod tests {
                     dst: dst_addr.clone().into(),
                     value: msg_balance.clone(),
                     bounce: true,
+                    extra_flags,
                     created_lt: prev_start_lt + 1000,
                     ..Default::default()
                 },
@@ -396,6 +585,7 @@ mod tests {
                 gas_fees,
                 action_fine,
                 received_message: &received_msg,
+                bounce_info_context,
             })
             .unwrap();
 
@@ -412,16 +602,29 @@ mod tests {
 
         // There were no extra currencies in the inbound message.
         assert_eq!(state.out_msgs.len(), 1);
-        let bounced_msg = state.out_msgs.last().unwrap().load().unwrap();
+        let message = state.out_msgs.last().unwrap();
+        let bounced_msg = message.load().unwrap();
+
         assert!(bounced_msg.init.is_none());
-        assert_eq!(bounced_msg.body.0.size_bits(), 32);
-        assert_eq!(
-            CellSlice::apply(&bounced_msg.body)
-                .unwrap()
-                .load_u32()
-                .unwrap(),
-            u32::MAX
-        );
+
+        if extra_flags.enabled {
+            assert_eq!(
+                CellSlice::apply(&bounced_msg.body)
+                    .unwrap()
+                    .load_u32()
+                    .unwrap(),
+                0xfffffffe
+            );
+        } else {
+            assert_eq!(bounced_msg.body.0.size_bits(), 32);
+            assert_eq!(
+                CellSlice::apply(&bounced_msg.body)
+                    .unwrap()
+                    .load_u32()
+                    .unwrap(),
+                u32::MAX
+            );
+        }
 
         let MsgInfo::Int(bounced_msg_info) = bounced_msg.info else {
             panic!("expected bounced internal message");
@@ -444,7 +647,7 @@ mod tests {
         assert!(bounced_msg_info.bounced);
         assert_eq!(bounced_msg_info.src, dst_addr.clone().into());
         assert_eq!(bounced_msg_info.dst, src_addr.clone().into());
-        assert_eq!(bounced_msg_info.ihr_fee, Tokens::ZERO);
+        assert_eq!(bounced_msg_info.extra_flags, extra_flags);
         assert_eq!(bounced_msg_info.fwd_fee, bounce_phase.fwd_fees);
         assert_eq!(bounced_msg_info.created_at, params.block_unixtime);
         assert_eq!(bounced_msg_info.created_lt, prev_start_lt + 1000 + 2);
@@ -475,6 +678,16 @@ mod tests {
         let prev_total_fees = state.total_fees;
         let prev_start_lt = state.start_lt;
 
+        let extra_flags = MessageExtraFlags {
+            enabled: true,
+            full_body_in_bounced: false,
+        };
+
+        let bounce_info_context = BounceInfoContext {
+            compute_phase_info: None,
+            bounce_reason: BounceReason::ComputePhaseSkipped(0),
+        };
+
         let received_msg = state
             .receive_in_msg(make_message(
                 IntMsgInfo {
@@ -483,6 +696,7 @@ mod tests {
                     value: Tokens::new(1).into(),
                     bounce: true,
                     created_lt: prev_start_lt + 1000,
+                    extra_flags,
                     ..Default::default()
                 },
                 None,
@@ -497,6 +711,7 @@ mod tests {
                 gas_fees: Tokens::ZERO,
                 action_fine: Tokens::ZERO,
                 received_message: &received_msg,
+                bounce_info_context,
             })
             .unwrap();
 
