@@ -742,7 +742,7 @@ impl CellOps {
 
     #[op(code = "cf50", fmt = "BTOS")]
     fn exec_builder_to_slice(st: &mut VmState) -> VmResult<i32> {
-        ok!(st.version.require_ton(11..)); // TODO: Should be 12
+        ok!(st.version.require_ton(12..));
 
         let stack = SafeRc::make_mut(&mut st.stack);
         let builder = ok!(stack.pop_builder());

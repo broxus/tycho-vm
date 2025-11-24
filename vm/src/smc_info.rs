@@ -23,7 +23,7 @@ pub enum VmVersion {
 }
 
 impl VmVersion {
-    pub const LATEST_TON: Self = Self::Ton(11);
+    pub const LATEST_TON: Self = Self::Ton(12);
 
     pub fn is_ton<R: std::ops::RangeBounds<u32>>(&self, range: R) -> bool {
         matches!(self, Self::Ton(version) if range.contains(version))
