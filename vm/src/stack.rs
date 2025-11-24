@@ -399,6 +399,15 @@ impl Stack {
         self.pop()?.into_cell_slice()
     }
 
+    pub fn pop_cs_opt(&mut self) -> VmResult<Option<SafeRc<OwnedCellSlice>>> {
+        let sv = self.pop()?;
+        if sv.is_null() {
+            Ok(None)
+        } else {
+            sv.into_cell_slice().map(Some)
+        }
+    }
+
     pub fn pop_builder(&mut self) -> VmResult<SafeRc<CellBuilder>> {
         self.pop()?.into_cell_builder()
     }

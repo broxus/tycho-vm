@@ -19,6 +19,7 @@ pub struct CryptOps;
 impl CryptOps {
     #[op(code = "f900", fmt = "HASHCU", args(src = HashSource::Cell))]
     #[op(code = "f901", fmt = "HASHSU", args(src = HashSource::Slice))]
+    #[op(code = "f916", fmt = "HASHBU", args(src = HashSource::Builder))]
     fn exec_compute_hash(st: &mut VmState, src: HashSource) -> VmResult<i32> {
         let stack = SafeRc::make_mut(&mut st.stack);
 
@@ -27,6 +28,11 @@ impl CryptOps {
             HashSource::Slice => {
                 let cs = ok!(stack.pop_cs());
                 let cell = CellBuilder::build_from_ext(cs.apply(), &st.gas)?;
+                *cell.repr_hash()
+            }
+            HashSource::Builder => {
+                let builder = ok!(stack.pop_builder());
+                let cell = SafeRc::unwrap_or_clone(builder).build()?;
                 *cell.repr_hash()
             }
         };
@@ -100,11 +106,6 @@ impl CryptOps {
         args(from_slice = true, can_use_id = true, use_explicit_id = false)
     )]
     #[op(
-        code = "f916",
-        fmt = "ED25519_CHKSIGNU",
-        args(from_slice = false, can_use_id = false, use_explicit_id = false)
-    )]
-    #[op(
         code = "f917",
         fmt = "ED25519_CHKSIGNS",
         args(from_slice = true, can_use_id = false, use_explicit_id = false)
@@ -116,16 +117,6 @@ impl CryptOps {
         use_explicit_id: bool,
     ) -> VmResult<i32> {
         exec_ed25519_check_internal(st, from_slice, can_use_id, use_explicit_id)
-    }
-
-    #[op(code = "f918ii",  fmt = ("ED25519_CHKSIGN_EXT {}", args & 0xff), args(i = SignArgs(args)))]
-    fn exec_ed25519_check_signature_ext(st: &mut VmState, i: SignArgs) -> VmResult<i32> {
-        exec_ed25519_check_internal(
-            st,
-            i.use_slice(),
-            i.use_chain_id(),
-            i.use_explicit_chain_id(),
-        )
     }
 
     fn exec_ed25519_check_internal(
@@ -204,20 +195,6 @@ impl CryptOps {
 
         ok!(stack.push_bool(is_valid || st.modifiers.chksig_always_succeed));
         Ok(0)
-    }
-}
-
-pub struct SignArgs(u32);
-
-impl SignArgs {
-    const fn use_slice(&self) -> bool {
-        self.0 & 0b001 != 0
-    }
-    const fn use_chain_id(&self) -> bool {
-        self.0 & 0b010 != 0
-    }
-    const fn use_explicit_chain_id(&self) -> bool {
-        self.0 & 0b100 != 0
     }
 }
 
@@ -438,6 +415,7 @@ impl std::fmt::Display for DisplayHashArgsExt {
 enum HashSource {
     Cell,
     Slice,
+    Builder,
 }
 
 #[cfg(test)]
@@ -448,7 +426,6 @@ mod tests {
     use tycho_crypto::ed25519;
     use tycho_types::cell::{CellBuilder, HashBytes};
 
-    use crate::instr::cryptops::ToSign;
     use crate::saferc::SafeRc;
     use crate::stack::RcStackValue;
     use crate::util::OwnedCellSlice;
@@ -561,72 +538,8 @@ mod tests {
         let data = [0xda_u8; 40];
         let data_signature = keypair.sign_raw(&data);
 
-        let tl_signature = keypair.sign_tl(ToSign {
-            signature_id: Some(1),
-            data: &data,
-        });
-
-        let none_tl_signature = keypair.sign_tl(ToSign {
-            signature_id: None,
-            data: &data,
-        });
-
         let data_hash = sha2::Sha256::digest(data);
         let data_hash_signature = keypair.sign_raw(&data_hash);
-
-        // equivalent if CHKSIGNS
-        assert_run_vm!(
-            "ED25519_CHKSIGN_EXT 1",
-            [
-                raw build_slice(data),
-                raw build_slice(data_signature),
-                raw build_int(keypair.public_key.as_bytes()),
-            ] => [int -1]
-        );
-
-        // use slice + can use chain_id + explicit chain_id 1
-        assert_run_vm!(
-            "ED25519_CHKSIGN_EXT 7",
-            [
-                raw build_slice(data),
-                raw build_slice(tl_signature),
-                raw build_int(keypair.public_key.as_bytes()),
-                int 1,
-            ] => [int -1]
-        );
-
-        // use slice + can use chain_id + explicit chain_id 1
-        assert_run_vm!(
-            "ED25519_CHKSIGN_EXT 7",
-            [
-                raw build_slice(data),
-                raw build_slice(none_tl_signature),
-                raw build_int(keypair.public_key.as_bytes()),
-                null,
-            ] => [int -1]
-        );
-
-        // invalid signature
-        assert_run_vm!(
-            "ED25519_CHKSIGN_EXT 7",
-            [
-                raw build_slice(data),
-                raw build_slice(none_tl_signature),
-                raw build_int(keypair.public_key.as_bytes()),
-                int 1,
-            ] => [int 0]
-        );
-
-        // equivalent if CHKSIGNS, but we pop chain_id from stack anyway and do not include it in check
-        assert_run_vm!(
-            "ED25519_CHKSIGN_EXT 5",
-            [
-                raw build_slice(data),
-                raw build_slice(data_signature),
-                raw build_int(keypair.public_key.as_bytes()),
-                int 1,
-            ] => [int -1]
-        );
 
         assert_run_vm!(
             "CHKSIGNS",
