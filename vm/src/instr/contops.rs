@@ -1,3 +1,4 @@
+use tycho_types::models::SignatureDomain;
 use tycho_types::prelude::*;
 use tycho_vm_proc::vm_module;
 
@@ -1519,6 +1520,11 @@ fn exec_runvm_common(st: &mut VmState, args: RunVmArgs) -> VmResult<i32> {
     let mut child_stack = ok!(stack.split_top(stack_size as usize));
     st.gas.try_consume_stack_gas(Some(&child_stack))?;
 
+    let child_signature_domains = SafeRc::new(match st.signature_domains.last() {
+        None | Some(SignatureDomain::Empty) => Vec::new(),
+        Some(signature_domain) => vec![*signature_domain],
+    });
+
     // Build child VM state.
 
     let parent_gas = ok!(st.gas.derive(GasConsumerDeriveParams {
@@ -1558,6 +1564,7 @@ fn exec_runvm_common(st: &mut VmState, args: RunVmArgs) -> VmResult<i32> {
     st.parent = Some(Box::new(ParentVmState {
         code: std::mem::replace(&mut st.code, child_code),
         stack: std::mem::replace(&mut st.stack, child_stack),
+        signature_domains: std::mem::replace(&mut st.signature_domains, child_signature_domains),
         cr: std::mem::replace(&mut st.cr, child_cr),
         committed_state: std::mem::take(&mut st.committed_state),
         steps: std::mem::take(&mut st.steps),
@@ -2635,6 +2642,65 @@ mod tests {
         assert_run_vm!(
             r#"INT 8 RUNVMX INT 1234"#,
             [int 0, slice child_code, int 200] => [int 215, int -14, int 215, int 1234],
+        );
+    }
+
+    #[test]
+    #[traced_test]
+    fn runvm_signdomain() {
+        assert_run_vm!(
+            "INT 0 PUSHSLICE { SIGNDOMAIN } RUNVM 0",
+            [] => [null, int 0]
+        );
+        assert_run_vm!(
+            "INT 123 SIGNDOMAIN_PUSH INT 0 PUSHSLICE { SIGNDOMAIN } RUNVM 0",
+            [] => [int 123, int 0]
+        );
+        assert_run_vm!(
+            r#"
+            INT 123 SIGNDOMAIN_PUSH
+            INT 234 SIGNDOMAIN_PUSH
+            INT 0 PUSHSLICE {
+                SIGNDOMAIN_POP
+                SIGNDOMAIN_POP
+                SIGNDOMAIN_POP
+            } RUNVM 0
+            SIGNDOMAIN_POP
+            SIGNDOMAIN_POP
+            SIGNDOMAIN_POP
+            "#,
+            [] => [int 234, null, null, int 0, int 234, int 123, null]
+        );
+        assert_run_vm!(
+            r#"
+            INT 123 SIGNDOMAIN_PUSH
+            INT 234 SIGNDOMAIN_PUSH
+            INT 0 PUSHSLICE {
+                INT 345 SIGNDOMAIN_PUSH
+                SIGNDOMAIN_POP
+                SIGNDOMAIN_POP
+                SIGNDOMAIN_POP
+            } RUNVM 0
+            SIGNDOMAIN_POP
+            SIGNDOMAIN_POP
+            SIGNDOMAIN_POP
+            "#,
+            [] => [int 345, int 234, null, int 0, int 234, int 123, null]
+        );
+        assert_run_vm!(
+            r#"
+            INT 123 SIGNDOMAIN_PUSH
+            NULL SIGNDOMAIN_PUSH
+            INT 0 PUSHSLICE {
+                SIGNDOMAIN
+                INT 234 SIGNDOMAIN_PUSH
+                SIGNDOMAIN
+            } RUNVM 0
+            SIGNDOMAIN_POP
+            SIGNDOMAIN_POP
+            SIGNDOMAIN_POP
+            "#,
+            [] => [null, int 234, int 0, null, int 123, null]
         );
     }
 

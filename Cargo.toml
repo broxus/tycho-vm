@@ -42,3 +42,6 @@ tycho-types = { version = "0.3.0", default-features = false, features = ["bigint
 
 tycho-vm = { version = "0.3.0", path = "./vm" }
 tycho-vm-proc = { version = "0.3.0", path = "./vm-proc" }
+
+[patch.crates-io]
+tycho-types = { git = "https://github.com/broxus/tycho-types.git", rev = "04023a04af95d446fc2c5ed29c233cac190a13d4" }

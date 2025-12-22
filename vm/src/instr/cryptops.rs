@@ -5,12 +5,13 @@ use sha2::Digest;
 use tycho_crypto::ed25519;
 use tycho_types::cell::{CellBuilder, CellSlice};
 use tycho_types::error::Error;
+use tycho_types::models::SignatureDomain;
 use tycho_vm_proc::vm_module;
 
 use crate::error::VmResult;
 use crate::gas::GasConsumer;
 use crate::saferc::SafeRc;
-use crate::stack::{Stack, StackValueType, Tuple};
+use crate::stack::{RcStackValue, Stack, StackValueType, Tuple};
 use crate::state::VmState;
 
 pub struct CryptOps;
@@ -98,39 +99,32 @@ impl CryptOps {
     #[op(
         code = "f910",
         fmt = "CHKSIGNU",
-        args(from_slice = false, can_use_id = true, use_explicit_id = false)
+        args(from_slice = false, can_use_id = true)
     )]
     #[op(
         code = "f911",
         fmt = "CHKSIGNS",
-        args(from_slice = true, can_use_id = true, use_explicit_id = false)
+        args(from_slice = true, can_use_id = true)
     )]
     #[op(
         code = "f917",
         fmt = "ED25519_CHKSIGNS",
-        args(from_slice = true, can_use_id = false, use_explicit_id = false)
+        args(from_slice = true, can_use_id = false)
     )]
     fn exec_ed25519_check_signature(
         st: &mut VmState,
         from_slice: bool,
         can_use_id: bool,
-        use_explicit_id: bool,
     ) -> VmResult<i32> {
-        exec_ed25519_check_internal(st, from_slice, can_use_id, use_explicit_id)
+        exec_ed25519_check_internal(st, from_slice, can_use_id)
     }
 
     fn exec_ed25519_check_internal(
         st: &mut VmState,
         from_slice: bool,
         can_use_id: bool,
-        use_explicit_chain_id: bool,
     ) -> VmResult<i32> {
         let stack = SafeRc::make_mut(&mut st.stack);
-        let explicit_chain_id = if use_explicit_chain_id {
-            ok!(stack.pop_smallint_signed_range_or_null(i32::MIN, i32::MAX))
-        } else {
-            None
-        };
 
         let key_int = ok!(stack.pop_int());
         let signature_cs = ok!(stack.pop_cs());
@@ -184,9 +178,13 @@ impl CryptOps {
 
             pubkey.verify_tl(
                 ToSign {
-                    signature_id: explicit_chain_id
-                        .or(st.modifiers.signature_with_id)
-                        .filter(|_| can_use_id),
+                    enable_signature_domains: st.modifiers.enable_signature_domains,
+                    signature_domain: st
+                        .signature_domains
+                        .last()
+                        .copied()
+                        .filter(|_| can_use_id)
+                        .unwrap_or(SignatureDomain::Empty),
                     data: &data[..data_len],
                 },
                 &signature,
@@ -196,10 +194,66 @@ impl CryptOps {
         ok!(stack.push_bool(is_valid || st.modifiers.chksig_always_succeed));
         Ok(0)
     }
+
+    #[op(code = "f91800", fmt = "SIGNDOMAIN")]
+    fn exec_signature_domain(st: &mut VmState) -> VmResult<i32> {
+        let stack = SafeRc::make_mut(&mut st.stack);
+
+        let signature_domain = st
+            .signature_domains
+            .last()
+            .copied()
+            .unwrap_or(SignatureDomain::Empty);
+
+        ok!(stack.push_raw(signature_domain.to_stack_item()));
+        Ok(0)
+    }
+
+    #[op(code = "f91801", fmt = "SIGNDOMAIN_POP")]
+    fn exec_pop_signature_domain(st: &mut VmState) -> VmResult<i32> {
+        let stack = SafeRc::make_mut(&mut st.stack);
+
+        st.gas
+            .try_consume_tuple_gas(st.signature_domains.len() as u64)?;
+        let signature_domain = SafeRc::make_mut(&mut st.signature_domains)
+            .pop()
+            .unwrap_or(SignatureDomain::Empty);
+
+        ok!(stack.push_raw(signature_domain.to_stack_item()));
+        Ok(0)
+    }
+
+    #[op(code = "f91802", fmt = "SIGNDOMAIN_PUSH")]
+    fn exec_push_signature_domain(st: &mut VmState) -> VmResult<i32> {
+        let stack = SafeRc::make_mut(&mut st.stack);
+        let global_id = ok!(stack.pop_smallint_signed_range_or_null(i32::MIN, i32::MAX));
+
+        SafeRc::make_mut(&mut st.signature_domains).push(match global_id {
+            None => SignatureDomain::Empty,
+            Some(global_id) => SignatureDomain::L2 { global_id },
+        });
+        st.gas
+            .try_consume_tuple_gas(st.signature_domains.len() as u64)?;
+        Ok(0)
+    }
+}
+
+trait SignatureDomainExt {
+    fn to_stack_item(&self) -> RcStackValue;
+}
+
+impl SignatureDomainExt for SignatureDomain {
+    fn to_stack_item(&self) -> RcStackValue {
+        match self {
+            SignatureDomain::Empty => Stack::make_null(),
+            SignatureDomain::L2 { global_id } => SafeRc::new_dyn_value(BigInt::from(*global_id)),
+        }
+    }
 }
 
 struct ToSign<'a> {
-    signature_id: Option<i32>,
+    enable_signature_domains: bool,
+    signature_domain: SignatureDomain,
     data: &'a [u8],
 }
 
@@ -208,7 +262,12 @@ impl tl_proto::TlWrite for ToSign<'_> {
 
     #[inline]
     fn max_size_hint(&self) -> usize {
-        (if self.signature_id.is_some() { 4 } else { 0 }) + self.data.len()
+        let prefix_len = match self.signature_domain {
+            SignatureDomain::Empty => 0,
+            _ if self.enable_signature_domains => 32,
+            SignatureDomain::L2 { .. } => 4,
+        };
+        prefix_len + self.data.len()
     }
 
     #[inline]
@@ -216,9 +275,18 @@ impl tl_proto::TlWrite for ToSign<'_> {
     where
         P: tl_proto::TlPacket,
     {
-        if let Some(id) = self.signature_id {
-            packet.write_raw_slice(&id.to_be_bytes());
+        match self.signature_domain {
+            // Empty signature domain always doesn't have any prefix.
+            SignatureDomain::Empty => {}
+            // All other signature domains are prefixed as hash.
+            _ if self.enable_signature_domains => {
+                packet.write_raw_slice(&tl_proto::hash(self.signature_domain));
+            }
+            // Fallback for the original `SignatureWithId` implementation
+            // if domains are disabled.
+            SignatureDomain::L2 { global_id } => packet.write_raw_slice(&global_id.to_be_bytes()),
         }
+
         packet.write_raw_slice(self.data);
     }
 }
@@ -425,6 +493,7 @@ mod tests {
     use tracing_test::traced_test;
     use tycho_crypto::ed25519;
     use tycho_types::cell::{CellBuilder, HashBytes};
+    use tycho_types::models::SignatureDomain;
 
     use crate::saferc::SafeRc;
     use crate::stack::RcStackValue;
@@ -607,6 +676,97 @@ mod tests {
                 raw build_slice(data_hash_signature),
                 raw build_int(keypair.public_key.as_bytes()),
             ] => [int 0]
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    #[traced_test]
+    fn signdomain_stack_only() {
+        assert_run_vm!("SIGNDOMAIN", [] => [null]);
+        assert_run_vm!("SIGNDOMAIN_POP", [] => [null]);
+
+        assert_run_vm!("SIGNDOMAIN_PUSH", [int 123] => []);
+        assert_run_vm!("INT 123 SIGNDOMAIN_PUSH SIGNDOMAIN", [] => [int 123]);
+        assert_run_vm!("INT 123 SIGNDOMAIN_PUSH SIGNDOMAIN_POP", [] => [int 123]);
+        assert_run_vm!("INT 123 SIGNDOMAIN_PUSH SIGNDOMAIN_POP SIGNDOMAIN_POP", [] => [int 123, null]);
+
+        assert_run_vm!("NULL SIGNDOMAIN_PUSH SIGNDOMAIN", [] => [null]);
+        assert_run_vm!("NULL SIGNDOMAIN_PUSH SIGNDOMAIN_POP", [] => [null]);
+        assert_run_vm!("NULL SIGNDOMAIN_PUSH SIGNDOMAIN_POP SIGNDOMAIN_POP", [] => [null, null]);
+
+        assert_run_vm!(
+            r#"
+            INT 123 SIGNDOMAIN_PUSH
+            NULL SIGNDOMAIN_PUSH
+            INT 234 SIGNDOMAIN_PUSH
+            SIGNDOMAIN_POP
+            SIGNDOMAIN_POP
+            SIGNDOMAIN_POP
+            SIGNDOMAIN_POP
+            "#,
+            [] => [int 234, null, int 123, null]
+        );
+
+        assert_run_vm!("SIGNDOMAIN_PUSH", [int i32::MIN] => []);
+        assert_run_vm!("SIGNDOMAIN_PUSH SIGNDOMAIN_POP", [int i32::MIN] => [int i32::MIN]);
+        assert_run_vm!("SIGNDOMAIN_PUSH", [int i32::MAX] => []);
+        assert_run_vm!("SIGNDOMAIN_PUSH SIGNDOMAIN_POP", [int i32::MAX] => [int i32::MAX]);
+    }
+
+    #[test]
+    #[traced_test]
+    fn signdomain_chksign() -> anyhow::Result<()> {
+        let secret = "403cbda795d10f129d81ac9963840f6100f8025e9341d486b247602e4b11f404"
+            .parse::<HashBytes>()?;
+        let keypair = ed25519::KeyPair::from(&ed25519::SecretKey::from_bytes(secret.0));
+
+        let data = [0xda_u8; 40];
+        let data_signature = keypair.sign_raw(&data);
+
+        let data_hash = sha2::Sha256::digest(data);
+        let data_hash_signature = keypair.sign_raw(&data_hash);
+
+        assert_run_vm!(
+            "INT 123 SIGNDOMAIN_PUSH CHKSIGNS",
+            [
+                raw build_slice(data),
+                raw build_slice(data_signature),
+                raw build_int(keypair.public_key.as_bytes()),
+            ] => [int 0]
+        );
+        assert_run_vm!(
+            "INT 123 SIGNDOMAIN_PUSH ROT SHA256U ROTREV CHKSIGNU",
+            [
+                raw build_slice(data),
+                raw build_slice(data_hash_signature),
+                raw build_int(keypair.public_key.as_bytes()),
+            ] => [int 0]
+        );
+
+        let data_with_prefix_signature =
+            keypair.sign_raw(&SignatureDomain::L2 { global_id: 123 }.apply(&data));
+        let data_with_prefix_hash_signature =
+            keypair.sign_raw(&SignatureDomain::L2 { global_id: 123 }.apply(&data_hash));
+
+        assert_run_vm!(
+            "INT 123 SIGNDOMAIN_PUSH CHKSIGNS",
+            state: |st| st.modifiers.enable_signature_domains = true,
+            [
+                raw build_slice(data),
+                raw build_slice(data_with_prefix_signature),
+                raw build_int(keypair.public_key.as_bytes()),
+            ] => [int -1]
+        );
+        assert_run_vm!(
+            "INT 123 SIGNDOMAIN_PUSH ROT SHA256U ROTREV CHKSIGNU",
+            state: |st| st.modifiers.enable_signature_domains = true,
+            [
+                raw build_slice(data),
+                raw build_slice(data_with_prefix_hash_signature),
+                raw build_int(keypair.public_key.as_bytes()),
+            ] => [int -1]
         );
 
         Ok(())

@@ -5,6 +5,7 @@ use num_bigint::BigInt;
 use tracing::instrument;
 use tycho_types::cell::*;
 use tycho_types::error::Error;
+use tycho_types::models::SignatureDomain;
 
 use crate::cont::{
     AgainCont, ArgContExt, ControlData, ControlRegs, ExcQuitCont, OrdCont, QuitCont, RcCont,
@@ -64,6 +65,13 @@ impl<'a> VmStateBuilder<'a> {
             }
         };
 
+        let signature_domain_stack =
+            SafeRc::new(if let Some(global_id) = self.modifiers.signature_with_id {
+                vec![SignatureDomain::L2 { global_id }]
+            } else {
+                Vec::new()
+            });
+
         VmState {
             cr: ControlRegs {
                 c: [
@@ -81,6 +89,7 @@ impl<'a> VmStateBuilder<'a> {
             code,
             throw_on_code_access,
             stack: self.stack,
+            signature_domains: signature_domain_stack,
             committed_state: None,
             steps: 0,
             quit0,
@@ -210,19 +219,35 @@ pub enum InitSelectorParams {
 
 /// Full execution state.
 pub struct VmState<'a> {
+    /// Current code slice.
     pub code: OwnedCellSlice,
+    /// Whether VM state is completely invalid.
     pub throw_on_code_access: bool,
+    /// Main VM stack.
     pub stack: SafeRc<Stack>,
+    /// Signature domain stack.
+    pub signature_domains: SafeRc<Vec<SignatureDomain>>,
+    /// Control registers.
     pub cr: ControlRegs,
+    /// Commited data and actions.
     pub committed_state: Option<CommittedState>,
+    /// Number of execution steps.
     pub steps: u64,
+    /// c0 continuation.
     pub quit0: SafeRc<QuitCont>,
+    /// c1 continuation.
     pub quit1: SafeRc<QuitCont>,
+    /// Gas usage.
     pub gas: GasConsumer<'a>,
+    /// Current codepage.
     pub cp: &'static DispatchTable,
+    /// Debug instructions output.
     pub debug: Option<&'a mut dyn std::fmt::Write>,
+    /// VM behaviour modifiers.
     pub modifiers: BehaviourModifiers,
+    /// Version.
     pub version: VmVersion,
+    /// Parent VM state.
     pub parent: Option<Box<ParentVmState<'a>>>,
 }
 
@@ -232,6 +257,8 @@ pub struct ParentVmState<'a> {
     pub code: OwnedCellSlice,
     /// Parent stack.
     pub stack: SafeRc<Stack>,
+    /// Parent signature domain stack.
+    pub signature_domains: SafeRc<Vec<SignatureDomain>>,
     /// Parent control registers.
     pub cr: ControlRegs,
     /// Parent committed state.
@@ -950,6 +977,7 @@ impl<'a> VmState<'a> {
         // Restore all values first.
         self.code = parent.code;
         let child_stack = std::mem::replace(&mut self.stack, parent.stack);
+        self.signature_domains = parent.signature_domains;
         self.cr = parent.cr;
         let child_committed_state =
             std::mem::replace(&mut self.committed_state, parent.committed_state);
@@ -1038,6 +1066,7 @@ struct OutOfGas;
 pub struct BehaviourModifiers {
     pub stop_on_accept: bool,
     pub chksig_always_succeed: bool,
+    pub enable_signature_domains: bool,
     pub signature_with_id: Option<i32>,
     #[cfg(feature = "tracing")]
     pub log_mask: VmLogMask,

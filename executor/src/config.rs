@@ -341,10 +341,7 @@ fn gas_bought_for(prices: &GasLimitsPrices, balance: &Tokens) -> u64 {
     let mut res = ((balance - prices.flat_gas_price as u128) << 16) / (prices.gas_price as u128);
     res = res.saturating_add(prices.flat_gas_limit as u128);
 
-    match res.try_into() {
-        Ok(limit) => limit,
-        Err(_) => u64::MAX,
-    }
+    res.try_into().unwrap_or(u64::MAX)
 }
 
 #[derive(Debug, Clone)]

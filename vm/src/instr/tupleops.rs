@@ -378,8 +378,8 @@ fn tuple_set_index_impl(stack: &mut Stack, i: usize, gas: &GasConsumer) -> VmRes
         max: tuple.len() as _,
         actual: i.to_string()
     });
-    SafeRc::make_mut(&mut tuple)[i] = x;
     gas.try_consume_tuple_gas(tuple.len() as u64)?;
+    SafeRc::make_mut(&mut tuple)[i] = x;
     ok!(stack.push_raw(tuple));
     Ok(0)
 }

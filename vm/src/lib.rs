@@ -105,6 +105,7 @@ macro_rules! assert_run_vm {
         $(c7: $c7_params:expr,)?
         $(gas: $gas_limit:expr,)?
         $(libs: $libs:expr,)?
+        $(state: |$state:ident| $state_expr:expr,)?
         [$($origin_stack:tt)*] => [$($expected_stack:tt)*]
         $(, exit_code: $exit_code:literal)?
         $(,)?
@@ -117,6 +118,7 @@ macro_rules! assert_run_vm {
             $crate::tuple![$($origin_stack)*],
             $crate::assert_run_vm!(@gas $($gas_limit)?),
             &libs,
+            $crate::assert_run_vm!(@state $($state $state_expr)?),
             &mut output,
         );
 
@@ -159,6 +161,12 @@ macro_rules! assert_run_vm {
     };
     (@libs $libs:expr) => {
         $libs
+    };
+    (@state) => {
+        |_| {}
+    };
+    (@state $state:ident $state_expr:expr) => {
+        |$state| $state_expr
     };
 }
 
@@ -268,6 +276,7 @@ mod tests {
         original_stack: I,
         gas_limit: u64,
         libs: &'a impl LibraryProvider,
+        modify_state: impl FnOnce(&mut VmState),
         output: &'a mut impl std::fmt::Write,
     ) -> (i32, VmState<'a>)
     where
@@ -291,6 +300,8 @@ mod tests {
                 ..GasParams::getter()
             })
             .build();
+
+        modify_state(&mut vm);
 
         let exit_code = !vm.run();
 

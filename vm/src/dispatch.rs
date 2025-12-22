@@ -546,6 +546,7 @@ mod tests {
             code: Default::default(),
             throw_on_code_access: false,
             stack: Default::default(),
+            signature_domains: Default::default(),
             cr: Default::default(),
             committed_state: Default::default(),
             steps: 0,
