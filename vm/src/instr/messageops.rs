@@ -185,7 +185,7 @@ impl MessageOps {
             None => 1 << 13,
         };
         let mut stats = {
-            let mut stats = StorageStat::with_limit(max_cells as _);
+            let mut stats = StorageStat::<BuildCellHasher>::with_limit(max_cells as _);
             let mut cs = msg_cell.as_slice()?;
             cs.skip_first(cs.size_bits(), 0).ok();
 
