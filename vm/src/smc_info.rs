@@ -6,6 +6,7 @@ use sha2::Digest;
 use tycho_types::error::Error;
 use tycho_types::models::{
     BlockchainConfigParams, CurrencyCollection, IntAddr, IntMsgInfo, MsgType, StateInit,
+    StoragePrices,
 };
 use tycho_types::num::Tokens;
 use tycho_types::prelude::*;
@@ -405,9 +406,8 @@ impl SmcInfoTonV6 {
         for value in prices.values_owned().reversed() {
             let value = value?;
 
-            // First 32 bits of value is unix timestamp.
-            let utime_since = value.0.apply_allow_exotic(&value.1).load_u32()?;
-            if now < utime_since {
+            let parsed = StoragePrices::load_from(&mut value.0.apply_allow_exotic(&value.1))?;
+            if now < parsed.utime_since {
                 continue;
             }
             return Ok(Some(value));
