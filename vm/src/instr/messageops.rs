@@ -3,9 +3,9 @@ use num_traits::ToPrimitive;
 use tycho_types::cell::{self, CellTreeStats, Lazy, LoadMode, StorageStat};
 use tycho_types::dict;
 use tycho_types::models::{
-    ChangeLibraryMode, CurrencyCollection, ExtAddr, ExtraCurrencyCollection, LibRef, MessageLayout,
-    MsgForwardPrices, OutAction, RelaxedMessage, RelaxedMsgInfo, ReserveCurrencyFlags,
-    SendMsgFlags, SizeLimitsConfig,
+    ChangeLibraryMode, CurrencyCollection, ExtAddr, ExtraCurrencyCollection, LibRef,
+    MessageExtraFlags, MessageLayout, MsgForwardPrices, OutAction, RelaxedMessage, RelaxedMsgInfo,
+    ReserveCurrencyFlags, SendMsgFlags, SizeLimitsConfig,
 };
 use tycho_types::num::{SplitDepth, Tokens};
 use tycho_types::prelude::*;
@@ -137,18 +137,16 @@ impl MessageOps {
 
         // Prefetch msg info.
         let mut is_masterchain = my_workchain == -1;
-        let mut ihr_disabled = true;
         let mut value = Tokens::ZERO;
         let mut has_extra_currencies = false;
         let mut user_fwd_fee = Tokens::ZERO;
-        let mut user_ihr_fee = Tokens::ZERO;
+        let mut extra_flags = MessageExtraFlags::empty();
         if let RelaxedMsgInfo::Int(info) = &msg.info {
             is_masterchain |= info.dst.is_masterchain();
-            ihr_disabled = info.ihr_disabled;
             value = info.value.tokens;
             has_extra_currencies = !info.value.other.is_empty();
             user_fwd_fee = info.fwd_fee;
-            user_ihr_fee = info.ihr_fee;
+            extra_flags = info.extra_flags;
         }
 
         // Get message forwarding prices.
@@ -216,21 +214,13 @@ impl MessageOps {
         }
 
         // Compute fees and final message layout.
-        let update_fees = |stats: CellTreeStats, fwd_fee: &mut Tokens, ihr_fee: &mut Tokens| {
+        let update_fees = |stats: CellTreeStats, fwd_fee: &mut Tokens| {
             let fwd_fee_short = prices.compute_fwd_fee(stats);
             *fwd_fee = std::cmp::max(fwd_fee_short, user_fwd_fee);
-            *ihr_fee = if ihr_disabled {
-                Tokens::ZERO
-            } else {
-                std::cmp::max(
-                    tokens_mul_frac(fwd_fee_short, prices.ihr_price_factor),
-                    user_ihr_fee,
-                )
-            };
         };
 
         let compute_msg_root_bits =
-            |msg_layout: &MessageLayout, fwd_fee: Tokens, ihr_fee: Tokens| {
+            |msg_layout: &MessageLayout, fwd_fee: Tokens, extra_flags: MessageExtraFlags| {
                 // Message info
                 let mut bits = match &msg.info {
                     RelaxedMsgInfo::ExtOut(info) => {
@@ -243,7 +233,7 @@ impl MessageOps {
                             + ok!(tokens_bit_len(value))
                             + 1
                             + ok!(tokens_bit_len(fwd_fee - fwd_fee_first))
-                            + ok!(tokens_bit_len(ihr_fee))
+                            + extra_flags.bit_len()
                             + 64
                             + 32
                     }
@@ -300,34 +290,33 @@ impl MessageOps {
 
         // Compute fees for the initial layout.
         let mut fwd_fee = Tokens::ZERO;
-        let mut ihr_fee = Tokens::ZERO;
-        update_fees(stats, &mut fwd_fee, &mut ihr_fee);
+        update_fees(stats, &mut fwd_fee);
 
         // Adjust layout for state init.
         if let Some(init) = &msg.init
             && !msg_layout.init_to_cell
-            && (ok!(compute_msg_root_bits(&msg_layout, fwd_fee, ihr_fee)) > cell::MAX_BIT_LEN
+            && (ok!(compute_msg_root_bits(&msg_layout, fwd_fee, extra_flags)) > cell::MAX_BIT_LEN
                 || compute_msg_root_refs(&msg_layout) > cell::MAX_REF_COUNT)
         {
             msg_layout.init_to_cell = true;
             stats.bit_count += init.bit_len() as u64;
             stats.cell_count += 1;
-            update_fees(stats, &mut fwd_fee, &mut ihr_fee);
+            update_fees(stats, &mut fwd_fee);
         }
 
         // Adjust layout for body.
         if !msg_layout.body_to_cell
-            && (ok!(compute_msg_root_bits(&msg_layout, fwd_fee, ihr_fee)) > cell::MAX_BIT_LEN
+            && (ok!(compute_msg_root_bits(&msg_layout, fwd_fee, extra_flags)) > cell::MAX_BIT_LEN
                 || compute_msg_root_refs(&msg_layout) > cell::MAX_REF_COUNT)
         {
             // msg_layout.body_to_cell = true;
             stats.bit_count += msg.body.size_bits() as u64;
             stats.cell_count += 1;
-            update_fees(stats, &mut fwd_fee, &mut ihr_fee);
+            update_fees(stats, &mut fwd_fee);
         }
 
         // Push the total fee to the stack.
-        ok!(stack.push_int(fwd_fee.into_inner().saturating_add(ihr_fee.into_inner())));
+        ok!(stack.push_int(fwd_fee.into_inner()));
 
         // Done
         if send {

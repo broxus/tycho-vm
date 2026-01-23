@@ -454,7 +454,6 @@ impl ExecutorState<'_> {
                 }
 
                 // Reset fees.
-                info.ihr_fee = Tokens::ZERO;
                 info.fwd_fee = Tokens::ZERO;
 
                 // Rewrite message timings.
@@ -1229,8 +1228,8 @@ mod tests {
     use tycho_asm_macros::tvmasm;
     use tycho_types::merkle::MerkleProof;
     use tycho_types::models::{
-        Anycast, AuthorityMarksConfig, IntAddr, MessageLayout, MsgInfo, RelaxedIntMsgInfo,
-        RelaxedMessage, StdAddr, VarAddr,
+        Anycast, AuthorityMarksConfig, IntAddr, MessageExtraFlags, MessageLayout, MsgInfo,
+        RelaxedIntMsgInfo, RelaxedMessage, StdAddr, VarAddr,
     };
     use tycho_types::num::{Uint9, VarUint248};
 
@@ -1662,7 +1661,7 @@ mod tests {
 
         assert_eq!(msg_info.value, (msg_value - expected_fwd_fees).into());
         assert_eq!(msg_info.fwd_fee, expected_fwd_fees - expected_first_frac);
-        assert_eq!(msg_info.ihr_fee, Tokens::ZERO);
+        assert_eq!(msg_info.extra_flags, MessageExtraFlags::default());
 
         assert_eq!(action_phase, ActionPhase {
             total_fwd_fees: Some(expected_fwd_fees),
@@ -1752,7 +1751,7 @@ mod tests {
             (prev_balance.tokens - expected_fwd_fees).into()
         );
         assert_eq!(msg_info.fwd_fee, expected_fwd_fees - expected_first_frac);
-        assert_eq!(msg_info.ihr_fee, Tokens::ZERO);
+        assert_eq!(msg_info.extra_flags, MessageExtraFlags::default());
 
         assert_eq!(action_phase, ActionPhase {
             total_fwd_fees: Some(expected_fwd_fees),
@@ -1852,7 +1851,7 @@ mod tests {
             other: sent_value.other.clone(),
         });
         assert_eq!(msg_info.fwd_fee, expected_fwd_fees - expected_first_frac);
-        assert_eq!(msg_info.ihr_fee, Tokens::ZERO);
+        assert_eq!(msg_info.extra_flags, MessageExtraFlags::default());
 
         assert_eq!(action_phase, ActionPhase {
             total_fwd_fees: Some(expected_fwd_fees),
@@ -2008,7 +2007,7 @@ mod tests {
                 other: to_send.other.clone(),
             });
             assert_eq!(msg_info.fwd_fee, expected_fwd_fees - expected_first_frac);
-            assert_eq!(msg_info.ihr_fee, Tokens::ZERO);
+            assert_eq!(msg_info.extra_flags, MessageExtraFlags::default());
 
             assert_eq!(action_phase, ActionPhase {
                 total_fwd_fees: Some(expected_fwd_fees),
@@ -2105,7 +2104,7 @@ mod tests {
             (OK_BALANCE * 3 / 4 - expected_fwd_fees).into()
         );
         assert_eq!(msg_info.fwd_fee, expected_fwd_fees - expected_first_frac);
-        assert_eq!(msg_info.ihr_fee, Tokens::ZERO);
+        assert_eq!(msg_info.extra_flags, MessageExtraFlags::default());
 
         assert_eq!(action_phase, ActionPhase {
             total_fwd_fees: Some(expected_fwd_fees),

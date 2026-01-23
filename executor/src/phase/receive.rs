@@ -40,7 +40,6 @@ impl ExecutorState<'_> {
 
                 // Update message balance
                 msg_balance_remaining = info.value;
-                msg_balance_remaining.try_add_assign_tokens(info.ihr_fee)?;
 
                 // Adjust LT range.
                 if info.created_lt >= self.start_lt {
@@ -485,17 +484,22 @@ mod tests {
         let params = make_default_params();
         let config = make_default_config();
 
-        ExecutorState::new_uninit(&params, &config, &STUB_ADDR, Tokens::MAX)
+        let mut state = ExecutorState::new_uninit(&params, &config, &STUB_ADDR, Tokens::MAX);
+
+        let received = state
             .receive_in_msg(make_message(
                 IntMsgInfo {
                     dst: STUB_ADDR.into(),
                     value: Tokens::MAX.into(),
-                    ihr_fee: Tokens::MAX,
                     ..Default::default()
                 },
                 None,
                 None,
             ))
+            .unwrap();
+
+        state
+            .credit_phase(&received)
             .inspect_err(|e| println!("{e}"))
             .unwrap_err();
     }

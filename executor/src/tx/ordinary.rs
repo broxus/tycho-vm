@@ -1,5 +1,7 @@
 use anyhow::{Context, anyhow};
-use tycho_types::models::{AccountStatus, ComputePhase, OrdinaryTxInfo};
+use tycho_types::models::{
+    AccountStatus, BounceReason, ComputePhase, NewBounceComputePhaseInfo, OrdinaryTxInfo,
+};
 use tycho_types::num::Tokens;
 use tycho_types::prelude::*;
 
@@ -126,9 +128,30 @@ impl ExecutorState<'_> {
         {
             debug_assert!(!is_external);
 
-            let gas_fees = match &compute_phase {
-                ComputePhase::Executed(phase) => phase.gas_fees,
-                ComputePhase::Skipped(_) => Tokens::ZERO,
+            let reason = if let Some(phase) = &action_phase {
+                BounceReason::ActionPhaseFailed {
+                    result_code: phase.result_code,
+                }
+            } else {
+                match &compute_phase {
+                    ComputePhase::Executed(phase) => BounceReason::ComputePhaseFailed {
+                        exit_code: phase.exit_code,
+                    },
+                    ComputePhase::Skipped(skipped) => {
+                        BounceReason::ComputePhaseSkipped(skipped.reason)
+                    }
+                }
+            };
+
+            let (gas_fees, compute_phase_info) = match &compute_phase {
+                ComputePhase::Executed(phase) => (
+                    phase.gas_fees,
+                    Some(NewBounceComputePhaseInfo {
+                        gas_used: phase.gas_used.into_inner().try_into().unwrap_or(u32::MAX),
+                        vm_steps: phase.vm_steps,
+                    }),
+                ),
+                ComputePhase::Skipped(_) => (Tokens::ZERO, None),
             };
 
             bounce_phase = Some(
@@ -136,6 +159,8 @@ impl ExecutorState<'_> {
                     gas_fees,
                     action_fine,
                     received_message: &msg,
+                    reason,
+                    compute_phase_info,
                 })
                 .context("bounce phase failed")?,
             );
