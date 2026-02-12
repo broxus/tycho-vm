@@ -186,8 +186,8 @@ impl LibraryProvider for NoLibraries {
 impl LibraryProvider for Dict<HashBytes, SimpleLib> {
     fn find(&self, library_hash: &HashBytes) -> Result<Option<Cell>, Error> {
         match self.get(library_hash)? {
-            Some(lib) => Ok(Some(lib.root)),
-            None => Ok(None),
+            Some(lib) if lib.root.repr_hash() == library_hash => Ok(Some(lib.root)),
+            _ => Ok(None),
         }
     }
 
@@ -196,8 +196,8 @@ impl LibraryProvider for Dict<HashBytes, SimpleLib> {
             .cast_ref::<HashBytes, SimpleLibRef<'_>>()
             .get(library_hash)?
         {
-            Some(lib) => Ok(Some(lib.root)),
-            None => Ok(None),
+            Some(lib) if lib.root.repr_hash() == library_hash => Ok(Some(lib.root)),
+            _ => Ok(None),
         }
     }
 }
@@ -206,8 +206,8 @@ impl LibraryProvider for Vec<Dict<HashBytes, SimpleLib>> {
     fn find(&self, library_hash: &HashBytes) -> Result<Option<Cell>, Error> {
         for lib in self {
             match lib.get(library_hash)? {
-                Some(lib) => return Ok(Some(lib.root)),
-                None => continue,
+                Some(lib) if lib.root.repr_hash() == library_hash => return Ok(Some(lib.root)),
+                _ => continue,
             }
         }
         Ok(None)
@@ -219,8 +219,8 @@ impl LibraryProvider for Vec<Dict<HashBytes, SimpleLib>> {
                 .cast_ref::<HashBytes, SimpleLibRef<'_>>()
                 .get(library_hash)?
             {
-                Some(lib) => return Ok(Some(lib.root)),
-                None => continue,
+                Some(lib) if lib.root.repr_hash() == library_hash => return Ok(Some(lib.root)),
+                _ => continue,
             }
         }
         Ok(None)
@@ -229,7 +229,13 @@ impl LibraryProvider for Vec<Dict<HashBytes, SimpleLib>> {
 
 impl LibraryProvider for Dict<HashBytes, LibDescr> {
     fn find(&self, library_hash: &HashBytes) -> Result<Option<Cell>, Error> {
-        Ok(self.get(library_hash)?.map(|lib| lib.lib.clone()))
+        Ok(self.get(library_hash)?.and_then(|descr| {
+            if descr.lib.repr_hash() == library_hash {
+                Some(descr.lib.clone())
+            } else {
+                None
+            }
+        }))
     }
 
     fn find_ref<'a>(&'a self, library_hash: &HashBytes) -> Result<Option<&'a DynCell>, Error> {
@@ -253,17 +259,35 @@ impl LibraryProvider for Dict<HashBytes, LibDescr> {
         Ok(self
             .cast_ref::<HashBytes, LibDescrRef<'a>>()
             .get(library_hash)?
-            .map(|lib| lib.lib))
+            .and_then(|descr| {
+                if descr.lib.repr_hash() == library_hash {
+                    Some(descr.lib)
+                } else {
+                    None
+                }
+            }))
     }
 }
 
 impl<S: BuildHasher> LibraryProvider for std::collections::HashMap<HashBytes, SimpleLib, S> {
     fn find(&self, library_hash: &HashBytes) -> Result<Option<Cell>, Error> {
-        Ok(self.get(library_hash).map(|lib| lib.root.clone()))
+        Ok(self.get(library_hash).and_then(|lib| {
+            if lib.root.repr_hash() == library_hash {
+                Some(lib.root.clone())
+            } else {
+                None
+            }
+        }))
     }
 
     fn find_ref<'a>(&'a self, library_hash: &HashBytes) -> Result<Option<&'a DynCell>, Error> {
-        Ok(self.get(library_hash).map(|lib| lib.root.as_ref()))
+        Ok(self.get(library_hash).and_then(|lib| {
+            if lib.root.repr_hash() == library_hash {
+                Some(lib.root.as_ref())
+            } else {
+                None
+            }
+        }))
     }
 }
 

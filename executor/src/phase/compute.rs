@@ -1893,7 +1893,11 @@ mod tests {
         let account_lib_code = Boc::decode(tvmasm!("THROWIF 43 INT -1"))?;
         let msg_lib_code = Boc::decode(tvmasm!("THROWIFNOT 44"))?;
 
-        params.libraries.set(HashBytes::ZERO, LibDescr {
+        println!("State lib hash: {}", state_lib_code.repr_hash());
+        println!("Account lib hash: {}", account_lib_code.repr_hash());
+        println!("Message lib hash: {}", msg_lib_code.repr_hash());
+
+        params.libraries.set(state_lib_code.repr_hash(), LibDescr {
             lib: state_lib_code.clone(),
             publishers: {
                 let mut p = Dict::new();
@@ -1905,9 +1909,9 @@ mod tests {
         let msg_state_init = StateInit {
             libraries: {
                 let mut p = Dict::new();
-                p.set(HashBytes([0x22; 32]), SimpleLib {
+                p.set(msg_lib_code.repr_hash(), SimpleLib {
                     public: false,
-                    root: msg_lib_code,
+                    root: msg_lib_code.clone(),
                 })?;
                 p
             },
@@ -1929,24 +1933,24 @@ mod tests {
                 }
                 // Execute state lib code
                 OVER
-                PUSHREF @{0000000000000000000000000000000000000000000000000000000000000000}
+                PUSHREF @{f3898d9454fc288ac160d46487de1303db2244da85d6908356b89090c7839e4a}
                 PUSH s2
                 EXECUTE
                 // Execute account lib code
-                PUSHREF @{1111111111111111111111111111111111111111111111111111111111111111}
+                PUSHREF @{d8b2b44711e73fece0f00b41be3aef8f3850169a7834852e1c8abf80c228cf57}
                 PUSH s2
                 EXECUTE
                 // Execute msg lib code
-                PUSHREF @{2222222222222222222222222222222222222222222222222222222222222222}
+                PUSHREF @{bc17092cb9d0bad5c5a523cd866d37f20d3783de23b891e48b903f7bca470998}
                 ROT
                 EXECUTE
                 "#
             ))?),
             libraries: {
                 let mut p = Dict::new();
-                p.set(HashBytes([0x11; 32]), SimpleLib {
+                p.set(account_lib_code.repr_hash(), SimpleLib {
                     public: false,
-                    root: account_lib_code,
+                    root: account_lib_code.clone(),
                 })?;
                 p
             },
