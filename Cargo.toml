@@ -40,8 +40,8 @@ tycho-asm-macros = "0.2.0"
 tycho-crypto = "0.4.0"
 tycho-types = { version = "0.3.2", default-features = false, features = ["bigint"] }
 
-tycho-vm = { version = "0.3.2", path = "./vm" }
-tycho-vm-proc = { version = "0.3.2", path = "./vm-proc" }
+tycho-vm = { version = "0.3.3", path = "./vm" }
+tycho-vm-proc = { version = "0.3.3", path = "./vm-proc" }
 
 [patch.crates-io]
 # patches here
