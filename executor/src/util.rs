@@ -20,7 +20,7 @@ pub(crate) const fn unlikely(b: bool) -> bool {
     }
 }
 
-#[derive(Default)]
+#[derive(Debug, Default)]
 pub struct StorageStatLimits {
     pub bit_count: u32,
     pub cell_count: u32,
@@ -86,6 +86,13 @@ impl Drop for OwnedExtStorageStat {
         // We must ensure that `inner` is dropped before `cells`.
         // SAFETY: This is the only place where `inner` is dropped.
         unsafe { ManuallyDrop::drop(&mut self.inner) };
+    }
+}
+
+impl std::fmt::Debug for OwnedExtStorageStat {
+    #[inline]
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        std::fmt::Debug::fmt(&self.inner, f)
     }
 }
 
@@ -161,6 +168,16 @@ impl<'a> ExtStorageStat<'a> {
 
         self.visited.insert(cell.repr_hash(), max_merkle_depth);
         (max_merkle_depth <= Self::MAX_ALLOWED_MERKLE_DEPTH).then_some(max_merkle_depth)
+    }
+}
+
+impl std::fmt::Debug for ExtStorageStat<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ExtStorageStat")
+            .field("limits", &self.limits)
+            .field("bits", &self.bits)
+            .field("cells", &self.cells)
+            .finish()
     }
 }
 

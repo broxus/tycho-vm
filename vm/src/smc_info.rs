@@ -570,7 +570,7 @@ impl SmcInfo for SmcInfoTonV11 {
 ///
 /// A `Send + Sync` alternative of C7 [`SafeRc<Tuple>`] at the cost of vec allocation.
 /// Can be shared between execution groups in multiple threads.
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct UnpackedConfig {
     pub latest_storage_prices: Option<CellSliceParts>,
     pub global_id: Option<Cell>,

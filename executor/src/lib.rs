@@ -42,6 +42,7 @@ mod tx {
 }
 
 /// Transaction executor.
+#[derive(Debug)]
 pub struct Executor<'a> {
     params: &'a ExecutorParams,
     config: &'a ParsedConfig,
@@ -252,6 +253,7 @@ impl PublicLibraryChange {
 pub type ModifySmcInfoFn = dyn FnMut(&mut phase::ComputePhaseSmcInfo) -> Result<()>;
 
 /// Shared state for executor phases.
+#[derive(Debug)]
 pub struct ExecutorState<'a> {
     pub params: &'a ExecutorParams,
     pub config: &'a ParsedConfig,
@@ -367,7 +369,7 @@ impl<'a> ExecutorState<'a> {
 }
 
 /// Executor configuration parameters.
-#[derive(Default, Clone)]
+#[derive(Debug, Default, Clone)]
 pub struct ExecutorParams {
     /// Public libraries from the referenced masterchain state.
     pub libraries: Dict<HashBytes, LibDescr>,

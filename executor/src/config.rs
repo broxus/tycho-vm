@@ -13,6 +13,7 @@ use tycho_vm::{GasParams, UnpackedConfig};
 use crate::util::shift_ceil_price;
 
 /// Parsed [`BlockchainConfigParams`].
+#[derive(Debug)]
 pub struct ParsedConfig {
     pub blackhole_addr: Option<HashBytes>,
     pub mc_gas_prices: GasLimitsPrices,

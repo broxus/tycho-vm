@@ -1,13 +1,13 @@
+[workspace]
+resolver = "2"
+members = ["disasm", "executor", "fuzz", "vm", "vm-proc"]
+
 [workspace.package]
-edition = "2024"
 authors = ["Rexagon <i.kalinin@dexpa.io>", "MrWad3r <s.eliseev@dexpa.io>"]
+edition = "2024"
 rust-version = "1.88.0"
 repository = "https://github.com/broxus/tycho-vm"
 license = "MIT OR Apache-2.0"
-
-[workspace]
-resolver = "2"
-members = ["disasm", "executor", "vm", "vm-proc", "fuzz"]
 
 [workspace.dependencies]
 ahash = "0.8"
@@ -39,9 +39,8 @@ tracing-test = "0.2"
 tycho-asm-macros = "0.2.0"
 tycho-crypto = "0.4.0"
 tycho-types = { version = "0.3.2", default-features = false, features = ["bigint"] }
-
-tycho-vm = { version = "0.3.3", path = "./vm" }
-tycho-vm-proc = { version = "0.3.3", path = "./vm-proc" }
+tycho-vm = { path = "./vm", version = "0.3.3" }
+tycho-vm-proc = { path = "./vm-proc", version = "0.3.3" }
 
 [patch.crates-io]
 # patches here
