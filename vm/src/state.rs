@@ -1090,6 +1090,7 @@ bitflags! {
 }
 
 /// Execution effects.
+#[derive(Debug)]
 pub struct CommittedState {
     /// Contract data.
     pub c4: Cell,

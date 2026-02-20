@@ -189,6 +189,10 @@ pub use self::gas::{
     GasConsumer, GasConsumerDeriveParams, GasParams, LibraryProvider, LimitedGasConsumer,
     NoLibraries, ParentGasConsumer, RestoredGasConsumer,
 };
+pub use self::getter::{
+    VmCaller, VmGetterArgs, VmGetterError, VmGetterMethodId, VmGetterOutput, VmMessageArgs,
+    VmMessageError, VmMessageOutput,
+};
 pub use self::instr::{codepage, codepage0};
 #[cfg(feature = "tracing")]
 pub use self::log::{VM_LOG_TARGET, VmLogRows, VmLogRowsGuard, VmLogSubscriber};
@@ -215,6 +219,7 @@ mod cont;
 mod dispatch;
 mod error;
 mod gas;
+mod getter;
 mod instr;
 mod saferc;
 mod smc_info;
