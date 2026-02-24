@@ -109,6 +109,30 @@ impl<'a> Executor<'a> {
     }
 
     #[inline]
+    pub fn check_ordinary<M>(&self, address: &StdAddr, msg: M, state: &ShardAccount) -> TxResult<()>
+    where
+        M: LoadMessage,
+    {
+        self.check_ordinary_ext(address, msg, state, None)
+    }
+
+    pub fn check_ordinary_ext<M>(
+        &self,
+        address: &StdAddr,
+        msg: M,
+        state: &ShardAccount,
+        inspector: Option<&mut ExecutorInspector<'_>>,
+    ) -> TxResult<()>
+    where
+        M: LoadMessage,
+    {
+        let msg_root = msg.load_message_root()?;
+        let account = state.load_account()?;
+        let mut exec = self.begin(address, account)?;
+        exec.check_ordinary_transaction(msg_root, inspector)
+    }
+
+    #[inline]
     pub fn begin_tick_tock<'s>(
         &self,
         address: &StdAddr,
