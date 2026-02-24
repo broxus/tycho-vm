@@ -80,6 +80,7 @@ impl ExecutorState<'_> {
                 input: TransactionInput::Ordinary(&msg),
                 storage_fee: storage_phase.storage_fees_collected,
                 force_accept: false,
+                stop_on_accept: false,
                 inspector: inspector.as_deref_mut(),
             })
             .context("compute phase failed")?;
@@ -177,6 +178,43 @@ impl ExecutorState<'_> {
             bounce_phase,
             destroyed,
         })
+    }
+
+    pub fn check_ordinary_transaction(
+        &mut self,
+        msg_root: Cell,
+        inspector: Option<&mut ExecutorInspector<'_>>,
+    ) -> TxResult<()> {
+        // Receive phase
+        let mut msg = match self.receive_in_msg(msg_root) {
+            Ok(msg) if msg.is_external => msg,
+            _ => return Err(TxError::Skipped),
+        };
+
+        // Storage phase
+        let storage_phase = self
+            .storage_phase(StoragePhaseContext {
+                adjust_msg_balance: false,
+                received_message: Some(&mut msg),
+            })
+            .context("storage phase failed")?;
+
+        // Compute phase with partial execution
+        let ComputePhaseFull { accepted, .. } = self
+            .compute_phase(ComputePhaseContext {
+                input: TransactionInput::Ordinary(&msg),
+                storage_fee: storage_phase.storage_fees_collected,
+                force_accept: false,
+                stop_on_accept: true,
+                inspector,
+            })
+            .context("compute phase failed")?;
+
+        if !accepted {
+            return Err(TxError::Skipped);
+        }
+
+        Ok(())
     }
 }
 

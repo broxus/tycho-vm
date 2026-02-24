@@ -39,6 +39,7 @@ impl ExecutorState<'_> {
                 input: TransactionInput::TickTock(kind),
                 storage_fee: storage_phase.storage_fees_collected,
                 force_accept: false,
+                stop_on_accept: false,
                 inspector: inspector.as_deref_mut(),
             })
             .context("compute phase failed")?;

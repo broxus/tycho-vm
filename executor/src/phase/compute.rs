@@ -28,6 +28,9 @@ pub struct ComputePhaseContext<'a, 'e> {
     ///
     /// Should only be used as part of the `run_local` stuff.
     pub force_accept: bool,
+    /// Only checks whether the contract accepts the message, without running
+    /// the rest of the contract body.
+    pub stop_on_accept: bool,
     /// Executor inspector.
     pub inspector: Option<&'a mut ExecutorInspector<'e>>,
 }
@@ -301,6 +304,10 @@ impl ExecutorState<'_> {
         }
 
         let libraries = (msg_libs, state_libs, &self.params.libraries);
+
+        let mut modifiers = self.params.vm_modifiers;
+        modifiers.stop_on_accept |= ctx.stop_on_accept;
+
         let mut vm = VmState::builder()
             .with_smc_info(smc_info)
             .with_code(code)
@@ -309,7 +316,7 @@ impl ExecutorState<'_> {
             .with_init_selector(false)
             .with_raw_stack(stack)
             .with_gas(gas)
-            .with_modifiers(self.params.vm_modifiers)
+            .with_modifiers(modifiers)
             .build();
 
         // Connect inspected output as debug.
@@ -585,6 +592,7 @@ mod tests {
             input: TransactionInput::Ordinary(&msg),
             storage_fee: Tokens::ZERO,
             force_accept: false,
+            stop_on_accept: false,
             inspector: None,
         })?;
 
@@ -637,6 +645,7 @@ mod tests {
             input: TransactionInput::Ordinary(&msg),
             storage_fee: Tokens::ZERO,
             force_accept: false,
+            stop_on_accept: false,
             inspector: None,
         })?;
 
@@ -682,6 +691,7 @@ mod tests {
             input: TransactionInput::Ordinary(&msg),
             storage_fee: Tokens::ZERO,
             force_accept: false,
+            stop_on_accept: false,
             inspector: None,
         })?;
 
@@ -744,6 +754,7 @@ mod tests {
             input: TransactionInput::Ordinary(&msg),
             storage_fee: Tokens::ZERO,
             force_accept: false,
+            stop_on_accept: false,
             inspector: None,
         })?;
 
@@ -817,6 +828,7 @@ mod tests {
             input: TransactionInput::Ordinary(&msg),
             storage_fee: Tokens::ZERO,
             force_accept: false,
+            stop_on_accept: false,
             inspector: None,
         })?;
 
@@ -900,6 +912,7 @@ mod tests {
             input: TransactionInput::Ordinary(&msg),
             storage_fee: Tokens::ZERO,
             force_accept: false,
+            stop_on_accept: false,
             inspector: None,
         })?;
 
@@ -968,6 +981,7 @@ mod tests {
             input: TransactionInput::Ordinary(&msg),
             storage_fee: Tokens::ZERO,
             force_accept: false,
+            stop_on_accept: false,
             inspector: None,
         })?;
 
@@ -1029,6 +1043,7 @@ mod tests {
             input: TransactionInput::Ordinary(&msg),
             storage_fee: Tokens::ZERO,
             force_accept: false,
+            stop_on_accept: false,
             inspector: None,
         })?;
 
@@ -1096,6 +1111,7 @@ mod tests {
             input: TransactionInput::Ordinary(&msg),
             storage_fee: Tokens::ZERO,
             force_accept: false,
+            stop_on_accept: false,
             inspector: None,
         })?;
 
@@ -1165,6 +1181,7 @@ mod tests {
             input: TransactionInput::Ordinary(&msg),
             storage_fee: Tokens::ZERO,
             force_accept: false,
+            stop_on_accept: false,
             inspector: None,
         })?;
 
@@ -1219,6 +1236,7 @@ mod tests {
             input: TransactionInput::Ordinary(&msg),
             storage_fee: Tokens::ZERO,
             force_accept: false,
+            stop_on_accept: false,
             inspector: None,
         })?;
 
@@ -1270,6 +1288,7 @@ mod tests {
             input: TransactionInput::Ordinary(&msg),
             storage_fee: Tokens::ZERO,
             force_accept: false,
+            stop_on_accept: false,
             inspector: None,
         })?;
 
@@ -1340,6 +1359,7 @@ mod tests {
             input: TransactionInput::Ordinary(&msg),
             storage_fee: Tokens::ZERO,
             force_accept: false,
+            stop_on_accept: false,
             inspector: None,
         })?;
 
@@ -1409,6 +1429,7 @@ mod tests {
             input: TransactionInput::Ordinary(&msg),
             storage_fee: Tokens::ZERO,
             force_accept: false,
+            stop_on_accept: false,
             inspector: None,
         })?;
 
@@ -1479,6 +1500,7 @@ mod tests {
             input: TransactionInput::Ordinary(&msg),
             storage_fee: Tokens::ZERO,
             force_accept: false,
+            stop_on_accept: false,
             inspector: None,
         })?;
 
@@ -1545,6 +1567,7 @@ mod tests {
             input: TransactionInput::Ordinary(&msg),
             storage_fee: Tokens::ZERO,
             force_accept: false,
+            stop_on_accept: false,
             inspector: None,
         })?;
 
@@ -1598,6 +1621,7 @@ mod tests {
             input: TransactionInput::Ordinary(&msg),
             storage_fee: Tokens::ZERO,
             force_accept: false,
+            stop_on_accept: false,
             inspector: None,
         })?;
 
@@ -1656,6 +1680,7 @@ mod tests {
             input: TransactionInput::Ordinary(&msg),
             storage_fee: Tokens::ZERO,
             force_accept: false,
+            stop_on_accept: false,
             inspector: None,
         })?;
 
@@ -1713,6 +1738,7 @@ mod tests {
             input: TransactionInput::Ordinary(&msg),
             storage_fee: Tokens::ZERO,
             force_accept: false,
+            stop_on_accept: false,
             inspector: None,
         })?;
 
@@ -1764,6 +1790,7 @@ mod tests {
             input: TransactionInput::TickTock(TickTock::Tick),
             storage_fee: Tokens::ZERO,
             force_accept: false,
+            stop_on_accept: false,
             inspector: None,
         })?;
 
@@ -1840,6 +1867,7 @@ mod tests {
             input: TransactionInput::TickTock(TickTock::Tick),
             storage_fee: Tokens::ZERO,
             force_accept: false,
+            stop_on_accept: false,
             inspector: None,
         })?;
 
@@ -1981,6 +2009,7 @@ mod tests {
             input: TransactionInput::Ordinary(&msg),
             storage_fee: Tokens::ZERO,
             force_accept: false,
+            stop_on_accept: false,
             inspector: None,
         })?;
 
