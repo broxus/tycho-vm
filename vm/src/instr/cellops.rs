@@ -598,7 +598,6 @@ impl CellOps {
 
         builder.set_exotic(special);
 
-        // TODO: Test if `special` build fails with ordinary cell type in first 8 bits
         let cell = builder.build_ext(&st.gas)?;
 
         ok!(stack.push(cell));
@@ -2792,6 +2791,22 @@ mod tests {
         assert_run_vm!("XLOADQ", libs: libs.clone(), [cell library.clone()] => [cell library_code.clone(), int -1]);
 
         Ok(())
+    }
+
+    #[test]
+    #[traced_test]
+    fn test_build_invalid_exotic() {
+        assert_run_vm!(
+            r#"
+            PUSHINT 0
+            NEWC
+            STU 8
+            TRUE
+            ENDXC
+            "#,
+            [] => [int 0],
+            exit_code: 8,
+        );
     }
 
     fn skip_common(slice: &OwnedCellSlice, prefix: &OwnedCellSlice) -> OwnedCellSlice {

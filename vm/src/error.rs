@@ -67,6 +67,7 @@ impl VmError {
                 }
                 Error::Cancelled => VmException::OutOfGas, // ?
                 Error::IntOverflow => VmException::IntOverflow,
+                Error::InvalidCell => VmException::CellOverflow,
                 _ => VmException::Fatal, // ?
             },
             Self::DictError => VmException::DictError,
