@@ -103,7 +103,19 @@ impl DebugOps {
             slice.skip_first(bits, 0)?;
             slice.only_first(data_bits, 0)?;
             vm_log_op!("DEBUGSTR {}", slice.display_as_stack_value());
-            writeln!(&mut *debug, "#DEBUG#: {}", DisplaySliceString(slice)).unwrap();
+
+            let mut without_tag = slice;
+            let (to_print, suffix) = match without_tag.load_u8()? {
+                0x00 => (without_tag, "\n"),
+                0x01 => (without_tag, ""),
+                _ => (slice, "\n"),
+            };
+            write!(
+                &mut *debug,
+                "#DEBUG#: {}{suffix}",
+                DisplaySliceString(to_print)
+            )
+            .unwrap();
         } else {
             vm_log_op!("DEBUGSTR");
         }
@@ -151,7 +163,7 @@ impl std::fmt::Display for DisplaySliceString<'_> {
             let mut slice = self.0;
             let mut bytes = &*slice.load_raw(bytes, bit_len).ok()?;
             while let [rest @ .., last] = bytes {
-                if *last == 0 || last.is_ascii_whitespace() {
+                if *last == 0 {
                     bytes = rest;
                 } else {
                     break;
@@ -190,7 +202,7 @@ mod tests {
             STRDUMP
             "#,
         ));
-        assert_eq!(output, "#DEBUG#: Spaces\n");
+        assert_eq!(output, "#DEBUG#: Spaces              \n");
 
         let output = run_get_dump(tvmasm!(
             r#"
@@ -224,13 +236,18 @@ mod tests {
         assert_eq!(output, "#DEBUG#: Hello, world!\n");
 
         let output = run_get_dump(tvmasm!("@inline x{feff53706163657320202020202020202020}"));
-        assert_eq!(output, "#DEBUG#: Spaces\n");
+        assert_eq!(output, "#DEBUG#: Spaces          \n");
+
+        let output = run_get_dump(tvmasm!("@inline x{FEF50050736b6f76}"));
+        assert_eq!(output, "#DEBUG#: Pskov\n");
+        let output = run_get_dump(tvmasm!("@inline x{FEF50150736b6f76}"));
+        assert_eq!(output, "#DEBUG#: Pskov");
 
         let output = run_get_dump(tvmasm!("@inline x{fef10000}"));
         assert_eq!(output, "#DEBUG#: \n");
 
         let output = run_get_dump(tvmasm!("@inline x{fef30000abab}"));
-        assert_eq!(output, "#DEBUG#: x0000ABAB\n");
+        assert_eq!(output, "#DEBUG#: x00ABAB\n");
     }
 
     fn run_get_dump(code: &[u8]) -> String {

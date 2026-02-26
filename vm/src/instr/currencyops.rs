@@ -364,7 +364,7 @@ fn parse_message_addr(
         // addr_var$11
         0b11 => {
             if version.is_ton(10..) {
-                return Err(Error::InvalidCell);
+                return Err(Error::CellUnderflow);
             }
             // anycast:(Maybe Anycast)
             let pfx = parse_maybe_anycast(cell, &mut cs, version)?;
@@ -393,7 +393,7 @@ fn parse_maybe_anycast(
     // just$1
     Ok(if cs.load_bit()? {
         if version.is_ton(10..) {
-            return Err(Error::InvalidCell);
+            return Err(Error::CellUnderflow);
         }
         // anycast_info$_ depth:(#<= 30)
         let depth = SplitDepth::new(load_uint_leq(cs, 30)? as u8)?;
@@ -481,7 +481,7 @@ fn skip_message_addr(cs: &mut CellSlice, version: &VmVersion) -> Result<(), Erro
         // addr_var$11
         0b11 => {
             if version.is_ton(10..) {
-                return Err(Error::InvalidCell);
+                return Err(Error::CellUnderflow);
             }
             // anycast:(Maybe Anycast)
             skip_maybe_anycast(cs, version)?;
@@ -529,7 +529,7 @@ fn skip_maybe_anycast(cs: &mut CellSlice, version: &VmVersion) -> Result<(), Err
     // just$1
     if cs.load_bit()? {
         if version.is_ton(10..) {
-            return Err(Error::InvalidCell);
+            return Err(Error::CellUnderflow);
         }
         // anycast_info$_ depth:(#<= 30)
         let depth = SplitDepth::new(load_uint_leq(cs, 30)? as u8)?;
@@ -763,7 +763,7 @@ mod test {
         let addr = OwnedCellSlice::new_allow_exotic(CellBuilder::build_from(addr)?);
         let value = SafeRc::new_dyn_value(addr.clone());
 
-        assert_run_vm!("PARSEMSGADDR", [raw value.clone()] => [int 0], exit_code: 12);
+        assert_run_vm!("PARSEMSGADDR", [raw value.clone()] => [int 0], exit_code: 9);
         assert_run_vm!("PARSEMSGADDRQ", [raw value.clone()] => [int 0]);
 
         Ok(())
