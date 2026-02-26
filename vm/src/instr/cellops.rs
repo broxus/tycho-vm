@@ -1628,7 +1628,7 @@ fn exec_store_int_common(stack: &mut Stack, bits: u16, args: StoreIntArgs) -> Vm
         code: i32,
         args: StoreIntArgs,
     ) -> VmResult<i32> {
-        if args.is_reversed() {
+        if !args.is_reversed() {
             ok!(stack.push_raw_int(x, true));
             ok!(stack.push_raw(builder));
         } else {
@@ -2821,6 +2821,31 @@ mod tests {
             "#,
             [] => [int 0],
             exit_code: 8,
+        );
+    }
+
+    #[test]
+    #[traced_test]
+    fn store_uint_quiet() {
+        let mut b = CellBuilder::new();
+        for n in [12, 13, 14] {
+            b.store_zeros(256 - 8).unwrap();
+            b.store_u8(n).unwrap();
+        }
+        assert_run_vm!(
+            r#"
+            PUSHINT 15
+            PUSHINT 14
+            PUSHINT 13
+            PUSHINT 12
+            NEWC
+            STU 256
+            STU 256
+            STU 256
+            STUQ 256
+            "#,
+            [] => [int 15, builder b, int -1],
+            exit_code: 0,
         );
     }
 
