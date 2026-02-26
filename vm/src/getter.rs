@@ -56,7 +56,7 @@ impl VmCaller {
         account: &Account,
         body: Cell,
     ) -> Result<VmMessageOutput, VmMessageError> {
-        self.call_with_external_message_body_ext(account, body, &Default::default())
+        self.call_with_external_message_body_ext(account, body, &Default::default(), None)
     }
 
     pub fn call_with_external_message_body_ext(
@@ -64,10 +64,11 @@ impl VmCaller {
         account: &Account,
         body: Cell,
         args: &VmMessageArgs,
+        debug: Option<&mut dyn std::fmt::Write>,
     ) -> Result<VmMessageOutput, VmMessageError> {
         let msg = build_external_message(&account.address, body)
             .map_err(VmMessageError::InvalidMessage)?;
-        self.call_with_message_ext(account, msg, args)
+        self.call_with_message_ext(account, msg, args, debug)
     }
 
     pub fn call_with_internal_message_body(
@@ -76,7 +77,7 @@ impl VmCaller {
         amount: CurrencyCollection,
         body: Cell,
     ) -> Result<VmMessageOutput, VmMessageError> {
-        self.call_with_internal_message_body_ext(account, amount, body, &Default::default())
+        self.call_with_internal_message_body_ext(account, amount, body, &Default::default(), None)
     }
 
     pub fn call_with_internal_message_body_ext(
@@ -85,10 +86,11 @@ impl VmCaller {
         amount: CurrencyCollection,
         body: Cell,
         args: &VmMessageArgs,
+        debug: Option<&mut dyn std::fmt::Write>,
     ) -> Result<VmMessageOutput, VmMessageError> {
         let msg = build_internal_message(&account.address, amount, body)
             .map_err(VmMessageError::InvalidMessage)?;
-        self.call_with_message_ext(account, msg, args)
+        self.call_with_message_ext(account, msg, args, debug)
     }
 
     pub fn call_with_message(
@@ -96,7 +98,7 @@ impl VmCaller {
         account: &Account,
         msg: Cell,
     ) -> Result<VmMessageOutput, VmMessageError> {
-        self.call_with_message_ext(account, msg, &Default::default())
+        self.call_with_message_ext(account, msg, &Default::default(), None)
     }
 
     pub fn call_with_message_ext(
@@ -104,6 +106,7 @@ impl VmCaller {
         account: &Account,
         msg: Cell,
         args: &VmMessageArgs,
+        debug: Option<&mut dyn std::fmt::Write>,
     ) -> Result<VmMessageOutput, VmMessageError> {
         let state = match &account.state {
             AccountState::Active(state_init) => state_init,
@@ -226,6 +229,10 @@ impl VmCaller {
             .with_modifiers(self.behaviour_modifiers)
             .build();
 
+        if let Some(debug) = debug {
+            vm.debug = Some(debug);
+        }
+
         let exit_code = !vm.run();
 
         let accepted = vm.gas.credit() == 0;
@@ -254,6 +261,7 @@ impl VmCaller {
             method.as_getter_method_id(),
             stack,
             &Default::default(),
+            None,
         )
     }
 
@@ -264,8 +272,9 @@ impl VmCaller {
         method: T,
         stack: Vec<RcStackValue>,
         args: &VmGetterArgs,
+        debug: Option<&mut dyn std::fmt::Write>,
     ) -> Result<VmGetterOutput, VmGetterError> {
-        self.call_getter_impl(account, method.as_getter_method_id(), stack, args)
+        self.call_getter_impl(account, method.as_getter_method_id(), stack, args, debug)
     }
 
     fn call_getter_impl(
@@ -274,6 +283,7 @@ impl VmCaller {
         method_id: u32,
         mut stack: Vec<RcStackValue>,
         args: &VmGetterArgs,
+        debug: Option<&mut dyn std::fmt::Write>,
     ) -> Result<VmGetterOutput, VmGetterError> {
         let state = match &account.state {
             AccountState::Active(state_init) => state_init,
@@ -316,6 +326,10 @@ impl VmCaller {
             .with_gas(args.gas_params)
             .with_modifiers(self.behaviour_modifiers)
             .build();
+
+        if let Some(debug) = debug {
+            vm.debug = Some(debug);
+        }
 
         let exit_code = !vm.run();
 
