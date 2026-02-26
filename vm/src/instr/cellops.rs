@@ -546,7 +546,7 @@ impl CellOps {
         f.record_opcode(&format_args!("STREF{refs}CONST"))
     }
 
-    #[op(code = "cf22$ss", fmt = "{s}", args(s = StoreLeIntArgs(args)))]
+    #[op(code = "cf2$10ss", fmt = "{s}", args(s = StoreLeIntArgs(args)))]
     fn exec_store_le_int(st: &mut VmState, s: StoreLeIntArgs) -> VmResult<i32> {
         let stack = SafeRc::make_mut(&mut st.stack);
         let mut builder = ok!(stack.pop_builder());
@@ -2176,7 +2176,22 @@ mod tests {
 
         assert_run_vm!("STBR", [builder builder2.clone(), builder builder1.clone()] => [builder result.clone()]);
         assert_run_vm!("STBRQ", [builder builder2.clone(), builder builder1.clone()] => [builder result.clone(), int 0]);
-        // 0 here is part of the spec
+
+        let empty = CellBuilder::new();
+
+        let mut b = CellBuilder::new();
+        b.store_u32((-123i32 as u32).swap_bytes()).unwrap();
+        assert_run_vm!("STILE4", [int -123, builder empty.clone()] => [builder b.clone()]);
+        assert_run_vm!("STILE4", [int u64::MAX, builder empty.clone()] => [int 0], exit_code: 5);
+        assert_run_vm!("STULE4", [int (-123i32 as u32), builder empty.clone()] => [builder b]);
+        assert_run_vm!("STULE4", [int -123i32, builder empty.clone()] => [int 0], exit_code: 5);
+
+        let mut b = CellBuilder::new();
+        b.store_u64((-123i64 as u64).swap_bytes()).unwrap();
+        assert_run_vm!("STILE8", [int -123, builder empty.clone()] => [builder b.clone()]);
+        assert_run_vm!("STILE8", [int u128::MAX, builder empty.clone()] => [int 0], exit_code: 5);
+        assert_run_vm!("STULE8", [int (-123i64 as u64), builder empty.clone()] => [builder b]);
+        assert_run_vm!("STULE8", [int -123i32, builder empty.clone()] => [int 0], exit_code: 5);
     }
 
     #[test]
