@@ -18,9 +18,14 @@ tycho-types = { workspace = true, default-features = false, features = ["models"
 tycho-vm = { workspace = true }
 
 [dev-dependencies]
+criterion = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true, features = ["env-filter"] }
 tycho-asm-macros = { workspace = true }
 tycho-types = { workspace = true, features = ["models", "base64"] }
 
 tycho-vm = { workspace = true, features = ["tracing"] }
+
+[[bench]]
+name = "validation"
+harness = false
