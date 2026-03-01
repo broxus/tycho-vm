@@ -190,7 +190,7 @@ pub use self::gas::{
     NoLibraries, ParentGasConsumer, RestoredGasConsumer,
 };
 pub use self::getter::{
-    VmCaller, VmGetterArgs, VmGetterError, VmGetterMethodId, VmGetterOutput, VmMessageArgs,
+    TxType, VmCaller, VmGetterArgs, VmGetterError, VmGetterMethodId, VmGetterOutput, VmMessageArgs,
     VmMessageError, VmMessageOutput,
 };
 pub use self::instr::{codepage, codepage0};

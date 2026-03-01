@@ -1,8 +1,9 @@
-use num_bigint::BigInt;
+use anyhow::bail;
+use num_bigint::{BigInt, Sign};
 use tycho_types::crc::crc_16;
 use tycho_types::models::{
     Account, AccountState, BlockchainConfigParams, CurrencyCollection, ExtInMsgInfo, IntAddr,
-    IntMsgInfo, LibDescr, MsgInfo, MsgType, OwnedMessage, StdAddr,
+    IntMsgInfo, LibDescr, MsgInfo, MsgType, OwnedMessage, StdAddr, TickTock,
 };
 use tycho_types::num::Tokens;
 use tycho_types::prelude::*;
@@ -45,6 +46,11 @@ pub struct VmCaller {
     pub libraries: Dict<HashBytes, LibDescr>,
     pub behaviour_modifiers: BehaviourModifiers,
     pub config: BlockchainConfigParams,
+}
+
+pub enum TxType {
+    TickTock(TickTock),
+    Ordinary(Cell),
 }
 
 impl VmCaller {
@@ -108,74 +114,134 @@ impl VmCaller {
         args: &VmMessageArgs,
         debug: Option<&mut dyn std::fmt::Write>,
     ) -> Result<VmMessageOutput, VmMessageError> {
+        self.run_vm(account, TxType::Ordinary(msg), args, debug)
+    }
+
+    pub fn call_tick_tock(
+        &self,
+        account: &Account,
+        tick_tock: TickTock,
+        args: &VmMessageArgs,
+        debug: Option<&mut dyn std::fmt::Write>,
+    ) -> Result<VmMessageOutput, VmMessageError> {
+        self.run_vm(account, TxType::TickTock(tick_tock), args, debug)
+    }
+
+    pub fn run_vm(
+        &self,
+        account: &Account,
+        tx_type: TxType,
+        args: &VmMessageArgs,
+        debug: Option<&mut dyn std::fmt::Write>,
+    ) -> Result<VmMessageOutput, VmMessageError> {
         let state = match &account.state {
             AccountState::Active(state_init) => state_init,
             _ => return Err(VmMessageError::NoCode),
         };
         let code = state.code.clone().ok_or(VmMessageError::NoCode)?;
 
-        let parsed = msg
-            .parse::<OwnedMessage>()
-            .map_err(VmMessageError::InvalidMessage)?;
-
-        let msg_lt;
-        let selector;
-        let message_balance;
-        let unpacked_in_msg;
-        match &parsed.info {
-            MsgInfo::ExtIn(_) => {
-                msg_lt = 0;
-                selector = -1;
-                message_balance = CurrencyCollection::ZERO;
-                unpacked_in_msg = None;
-            }
-            MsgInfo::Int(info) => {
-                let src_addr_slice =
-                    load_int_msg_src_addr(&msg).map_err(VmMessageError::InvalidMessage)?;
-
-                msg_lt = info.created_lt;
-                selector = 0;
-                message_balance = info.value.clone();
-                unpacked_in_msg = Some(
-                    UnpackedInMsgSmcInfo {
-                        bounce: info.bounce,
-                        bounced: info.bounced,
-                        src_addr: src_addr_slice.into(),
-                        fwd_fee: info.fwd_fee,
-                        created_lt: info.created_lt,
-                        created_at: info.created_at,
-                        original_value: info.value.tokens,
-                        remaining_value: info.value.clone(),
-                        state_init: parsed
-                            .init
-                            .as_ref()
-                            .map(CellBuilder::build_from)
-                            .transpose()
-                            .map_err(VmMessageError::InvalidMessage)?,
-                    }
-                    .into_tuple(),
-                );
-            }
-            MsgInfo::ExtOut(_) => return Err(VmMessageError::ExtOut),
-        }
-
         let balance = args
             .override_balance
             .clone()
             .unwrap_or_else(|| account.balance.clone());
 
-        let stack = Stack {
-            items: tuple![
-                int balance.tokens,
-                int message_balance.tokens,
-                cell msg,
-                slice parsed.body,
-                int selector,
-            ],
+        let msg_lt;
+        let selector;
+        let message_balance;
+        let unpacked_in_msg;
+        let stack;
+
+        match tx_type {
+            TxType::TickTock(tick_tock) => {
+                msg_lt = 0;
+                selector = -2;
+                message_balance = CurrencyCollection::ZERO;
+                unpacked_in_msg = None;
+
+                let addr = match &account.address {
+                    IntAddr::Std(addr) => {
+                        let mut a = BigInt::ZERO;
+                        for x in addr.address.0 {
+                            a = (a << 8) + x;
+                        }
+                        a
+                    }
+                    IntAddr::Var(_) => {
+                        return Err(VmMessageError::AccountNoStdAddress);
+                    }
+                };
+                let tick_tock_flag = match tick_tock {
+                    TickTock::Tick => 0,
+                    TickTock::Tock => -1,
+                };
+
+                stack = Stack {
+                    items: tuple![
+                        int balance.tokens,
+                        int addr,
+                        int tick_tock_flag,
+                        int selector,
+                    ],
+                };
+            }
+            TxType::Ordinary(msg) => {
+                let parsed = msg
+                    .parse::<OwnedMessage>()
+                    .map_err(VmMessageError::InvalidMessage)?;
+
+                match &parsed.info {
+                    MsgInfo::ExtIn(_) => {
+                        msg_lt = 0;
+                        selector = -1;
+                        message_balance = CurrencyCollection::ZERO;
+                        unpacked_in_msg = None;
+                    }
+                    MsgInfo::Int(info) => {
+                        let src_addr_slice =
+                            load_int_msg_src_addr(&msg).map_err(VmMessageError::InvalidMessage)?;
+
+                        msg_lt = info.created_lt;
+                        selector = 0;
+                        message_balance = info.value.clone();
+                        unpacked_in_msg = Some(
+                            UnpackedInMsgSmcInfo {
+                                bounce: info.bounce,
+                                bounced: info.bounced,
+                                src_addr: src_addr_slice.into(),
+                                fwd_fee: info.fwd_fee,
+                                created_lt: info.created_lt,
+                                created_at: info.created_at,
+                                original_value: info.value.tokens,
+                                remaining_value: info.value.clone(),
+                                state_init: parsed
+                                    .init
+                                    .as_ref()
+                                    .map(CellBuilder::build_from)
+                                    .transpose()
+                                    .map_err(VmMessageError::InvalidMessage)?,
+                            }
+                            .into_tuple(),
+                        );
+                    }
+                    MsgInfo::ExtOut(_) => return Err(VmMessageError::ExtOut),
+                }
+
+                stack = Stack {
+                    items: tuple![
+                        int balance.tokens,
+                        int message_balance.tokens,
+                        cell msg,
+                        slice parsed.body,
+                        int selector,
+                    ],
+                };
+            }
         };
 
         let gas_params = args.override_gas_params.unwrap_or_else(|| {
-            let (limit, credit) = if selector == 0 {
+            let (limit, credit) = if selector == -2 {
+                (70_000_000, 0)
+            } else if selector == 0 {
                 let message_balance =
                     u64::try_from(message_balance.tokens.into_inner()).unwrap_or(u64::MAX);
                 (message_balance.saturating_mul(1000), 0)
@@ -240,6 +306,11 @@ impl VmCaller {
 
         Ok(VmMessageOutput {
             exit_code,
+            exit_arg: if success {
+                None
+            } else {
+                vm.stack.get_exit_arg().filter(|x| *x != 0)
+            },
             stack: vm.stack.items.clone(),
             success,
             gas_used: vm.gas.consumed(),
@@ -441,6 +512,7 @@ impl Default for VmMessageArgs {
 #[derive(Debug)]
 pub struct VmMessageOutput {
     pub exit_code: i32,
+    pub exit_arg: Option<i32>,
     pub stack: Vec<RcStackValue>,
     pub success: bool,
     pub gas_used: u64,
@@ -460,6 +532,8 @@ pub enum VmMessageError {
     InvalidConfig(tycho_types::error::Error),
     #[error("account has no code")]
     NoCode,
+    #[error("account has no std address")]
+    AccountNoStdAddress,
 }
 
 #[derive(Debug)]
