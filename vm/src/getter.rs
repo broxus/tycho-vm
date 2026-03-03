@@ -1,5 +1,4 @@
-use anyhow::bail;
-use num_bigint::{BigInt, Sign};
+use num_bigint::BigInt;
 use tycho_types::crc::crc_16;
 use tycho_types::models::{
     Account, AccountState, BlockchainConfigParams, CurrencyCollection, ExtInMsgInfo, IntAddr,
@@ -55,7 +54,8 @@ pub enum TxType {
 
 impl VmCaller {
     const MAX_GAS: u64 = 1_000_000;
-    const BASE_GAS_PRICE: u64 = 1000 << 16;
+    const BASE_GAS_PRICE: u64 = 10_000 << 16;
+    const MC_GAS_PRICE: u64 = 400 << 16;
 
     pub fn call_with_external_message_body(
         &self,
@@ -238,13 +238,24 @@ impl VmCaller {
             }
         };
 
+        let (address_hash, wid) = match &account.address {
+            IntAddr::Std(addr) => (addr.address, addr.workchain),
+            IntAddr::Var(_) => return Err(VmMessageError::AccountNoStdAddress),
+        };
+
         let gas_params = args.override_gas_params.unwrap_or_else(|| {
+            let price = if wid == 0 {
+                Self::BASE_GAS_PRICE
+            } else {
+                Self::MC_GAS_PRICE
+            };
+
             let (limit, credit) = if selector == -2 {
-                (70_000_000, 0)
+                (1_000_000, 0)
             } else if selector == 0 {
                 let message_balance =
                     u64::try_from(message_balance.tokens.into_inner()).unwrap_or(u64::MAX);
-                (message_balance.saturating_mul(1000), 0)
+                (message_balance.saturating_mul(price >> 16), 0)
             } else {
                 (0, 10000)
             };
@@ -253,14 +264,9 @@ impl VmCaller {
                 max: Self::MAX_GAS,
                 limit,
                 credit,
-                price: Self::BASE_GAS_PRICE,
+                price
             }
         });
-
-        let address_hash = match &account.address {
-            IntAddr::Std(addr) => addr.address,
-            IntAddr::Var(_) => HashBytes::ZERO,
-        };
 
         let lt = std::cmp::max(account.last_trans_lt, msg_lt);
         let smc_info = SmcInfoBase::new()
