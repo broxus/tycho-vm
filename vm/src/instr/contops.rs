@@ -8,7 +8,7 @@ use crate::dispatch::DumpOutput;
 use crate::error::VmResult;
 #[cfg(feature = "dump")]
 use crate::error::{DumpError, DumpResult};
-use crate::gas::{GasConsumer, GasConsumerDeriveParams};
+use crate::gas::{GasConsumer, GasConsumerDeriveParams, GasParams};
 use crate::instr::codepage0;
 use crate::saferc::SafeRc;
 use crate::stack::{Stack, StackValueType};
@@ -1481,14 +1481,14 @@ fn exec_runvm_common(st: &mut VmState, args: RunVmArgs) -> VmResult<i32> {
     let stack = SafeRc::make_mut(&mut st.stack);
 
     let mut gas_max = if args.load_hard_gas_limit() {
-        ok!(stack.pop_long_range(0, u64::MAX))
+        ok!(stack.pop_long_range(0, GasParams::MAX_GAS))
     } else {
-        u64::MAX
+        GasParams::MAX_GAS
     };
     let gas_limit = if args.load_gas() {
-        ok!(stack.pop_long_range(0, u64::MAX))
+        ok!(stack.pop_long_range(0, GasParams::MAX_GAS))
     } else {
-        u64::MAX
+        GasParams::MAX_GAS
     };
 
     if args.load_hard_gas_limit() {

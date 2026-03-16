@@ -3,6 +3,7 @@ use tycho_vm_proc::vm_module;
 
 use crate::cont::QuitCont;
 use crate::error::VmResult;
+use crate::gas::GasParams;
 use crate::saferc::SafeRc;
 use crate::state::VmState;
 
@@ -12,7 +13,7 @@ pub struct GasOps;
 impl GasOps {
     #[op(code = "f800", fmt = "ACCEPT")]
     fn exec_accept(st: &mut VmState) -> VmResult<i32> {
-        exec_set_gas(st, i64::MAX as _)
+        exec_set_gas(st, GasParams::MAX_GAS)
     }
 
     #[op(code = "f801", fmt = "SETGASLIMIT")]
@@ -140,6 +141,7 @@ mod tests {
 
         assert_run_vm!("SETGASLIMIT", [int 0] => [int 26], exit_code: -14);
         assert_run_vm!("SETGASLIMIT", [int u128::MAX] => []);
+        assert_run_vm!("SETGASLIMIT", [int -100] => [int 26], exit_code: -14);
 
         assert_run_vm!("BUYGAS", [int 0] => [int 26], exit_code: -14);
         assert_run_vm!("BUYGAS", gas: 1000, [int 999_000] => []);

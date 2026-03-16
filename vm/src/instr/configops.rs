@@ -9,7 +9,7 @@ use tycho_vm_proc::vm_module;
 
 use crate::cont::ControlRegs;
 use crate::error::VmResult;
-use crate::gas::GasConsumer;
+use crate::gas::{GasConsumer, GasParams};
 use crate::saferc::SafeRc;
 use crate::smc_info::{SmcInfoBase, SmcInfoTonV4, SmcInfoTonV6, SmcInfoTonV11};
 use crate::stack::{RcStackValue, Stack, TupleExt};
@@ -126,7 +126,7 @@ impl ConfigOps {
 
         let stack = SafeRc::make_mut(&mut st.stack);
         let is_masterchain = ok!(stack.pop_bool());
-        let gas = ok!(stack.pop_long_range(0, u64::MAX));
+        let gas = ok!(stack.pop_long_range(0, GasParams::MAX_GAS));
 
         let t2 = ok!(get_parsed_config(&st.cr));
         let cs = ok!(t2.try_get_ref::<OwnedCellSlice>(if is_masterchain { 2 } else { 3 }));
@@ -233,7 +233,7 @@ impl ConfigOps {
 
         let stack = SafeRc::make_mut(&mut st.stack);
         let is_masterchain = ok!(stack.pop_bool());
-        let gas = ok!(stack.pop_long_range(0, u64::MAX));
+        let gas = ok!(stack.pop_long_range(0, GasParams::MAX_GAS));
 
         let t2 = ok!(get_parsed_config(&st.cr));
         let cs = ok!(t2.try_get_ref::<OwnedCellSlice>(if is_masterchain { 2 } else { 3 }));
