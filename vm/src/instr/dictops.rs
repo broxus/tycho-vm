@@ -211,7 +211,7 @@ impl DictOps {
         if mode == SetMode::Set {
             result?;
         } else {
-            ok!(stack.push_bool(result.is_ok()));
+            ok!(stack.push_bool(result.unwrap_or_default()));
         }
         Ok(0)
     }
@@ -1002,6 +1002,46 @@ pub mod tests {
         assert_run_vm!(
             "DICTISETREF",
             [raw new_cell(123), int 1, raw dict_value.clone(), int 32] => [raw result_dict],
+        );
+
+        assert_run_vm!(
+            r#"
+            PUSHINT 444
+            NEWC
+            STU 256
+            PUSHINT 333
+            NULL
+            PUSHPOW2 8
+            DICTUREPLACEB
+            NIP
+            THROWIF 100
+            "#,
+            [] => [],
+        );
+
+        assert_run_vm!(
+            r#"
+            PUSHINT 333
+            NEWC
+            STU 256
+            PUSHINT 222
+            NULL
+            PUSHPOW2 8
+            DICTUADDB
+            DUP
+            THROWIFNOT 100
+            SWAP
+            PUSHINT 444
+            NEWC
+            STU 256
+            PUSHINT 222
+            ROT
+            PUSHPOW2 8
+            DICTUADDB
+            THROWIF 200
+            DROP2
+            "#,
+            [] => [],
         );
     }
 

@@ -31,12 +31,12 @@ impl BenchFixture {
 
         // The state was captured after this message was already processed, so
         // `stored_timestamp` field equals the message timestamp — the contract would reject it.
-        if let AccountState::Active(ref mut state_init) = state.state {
-            if let Some(data) = &state_init.data {
-                let mut cs = data.as_ref().as_slice().unwrap();
-                let pubkey: HashBytes = cs.load_u256().unwrap();
-                state_init.data = Some(CellBuilder::build_from((pubkey, 0u64)).unwrap());
-            }
+        if let AccountState::Active(ref mut state_init) = state.state
+            && let Some(data) = &state_init.data
+        {
+            let mut cs = data.as_ref().as_slice().unwrap();
+            let pubkey: HashBytes = cs.load_u256().unwrap();
+            state_init.data = Some(CellBuilder::build_from((pubkey, 0u64)).unwrap());
         }
 
         let message = Boc::decode(include_bytes!("data/msg.boc")).unwrap();
