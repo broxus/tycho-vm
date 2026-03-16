@@ -229,7 +229,8 @@ mod util;
 
 #[doc(hidden)]
 pub mod __export {
-    pub use {num_bigint, tycho_types};
+    pub use num_bigint;
+    pub use tycho_types;
 }
 
 #[doc(hidden)]

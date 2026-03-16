@@ -10,7 +10,7 @@ use tycho_types::prelude::*;
 
 use crate::{
     BehaviourModifiers, CommittedState, GasParams, RcStackValue, SafeRc, SmcInfoBase, Stack,
-    UnpackedInMsgSmcInfo, VmStateBuilder,
+    UnpackedInMsgSmcInfo, VmStateBuilder, VmVersion,
 };
 
 pub trait VmGetterMethodId {
@@ -323,6 +323,7 @@ impl VmCaller {
             .with_raw_stack(SafeRc::new(Stack { items: stack }))
             .with_gas(gas_params)
             .with_modifiers(self.behaviour_modifiers)
+            .with_version(VmVersion::LATEST_TON)
             .build();
 
         if let Some(debug) = debug {
