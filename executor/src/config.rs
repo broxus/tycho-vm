@@ -247,6 +247,7 @@ impl ParsedConfig {
         Tokens::new(shift_ceil_price(total))
     }
 
+    // TODO: Replace with `GasLimitsPrices::compute_gas_params` when published.
     /// Computes gas credit and limits bought for the provided balances.
     pub fn compute_gas_params(
         &self,
@@ -320,6 +321,7 @@ struct ParsedStoragePrices {
     storage_prices: Vec<StoragePrices>,
 }
 
+// TODO: Replace with `GasLimitsPrices::gas_bought_for` when new version is published.
 fn gas_bought_for(prices: &GasLimitsPrices, balance: &Tokens) -> u64 {
     let balance = balance.into_inner();
     if balance == 0 || balance < prices.flat_gas_price as u128 {

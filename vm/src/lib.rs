@@ -190,8 +190,8 @@ pub use self::gas::{
     NoLibraries, ParentGasConsumer, RestoredGasConsumer,
 };
 pub use self::getter::{
-    TxType, VmCaller, VmGetterArgs, VmGetterError, VmGetterMethodId, VmGetterOutput, VmMessageArgs,
-    VmMessageError, VmMessageOutput,
+    VmCaller, VmCallerTxInput, VmGetterArgs, VmGetterError, VmGetterMethodId, VmGetterOutput,
+    VmMessageArgs, VmMessageError, VmMessageOutput,
 };
 pub use self::instr::{codepage, codepage0};
 #[cfg(feature = "tracing")]

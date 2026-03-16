@@ -1,8 +1,9 @@
 use num_bigint::BigInt;
 use tycho_types::crc::crc_16;
 use tycho_types::models::{
-    Account, AccountState, BlockchainConfigParams, CurrencyCollection, ExtInMsgInfo, IntAddr,
-    IntMsgInfo, LibDescr, MsgInfo, MsgType, OwnedMessage, StdAddr, TickTock,
+    Account, AccountState, BlockchainConfigParams, CurrencyCollection, ExtInMsgInfo,
+    GasLimitsPrices, IntAddr, IntMsgInfo, LibDescr, MsgInfo, MsgType, OwnedMessage, StdAddr,
+    TickTock,
 };
 use tycho_types::num::Tokens;
 use tycho_types::prelude::*;
@@ -41,22 +42,18 @@ impl VmGetterMethodId for str {
     }
 }
 
+pub enum VmCallerTxInput {
+    TickTock(TickTock),
+    Ordinary(Cell),
+}
+
 pub struct VmCaller {
     pub libraries: Dict<HashBytes, LibDescr>,
     pub behaviour_modifiers: BehaviourModifiers,
     pub config: BlockchainConfigParams,
 }
 
-pub enum TxType {
-    TickTock(TickTock),
-    Ordinary(Cell),
-}
-
 impl VmCaller {
-    const MAX_GAS: u64 = 1_000_000;
-    const BASE_GAS_PRICE: u64 = 10_000 << 16;
-    const MC_GAS_PRICE: u64 = 400 << 16;
-
     pub fn call_with_external_message_body(
         &self,
         account: &Account,
@@ -114,23 +111,31 @@ impl VmCaller {
         args: &VmMessageArgs,
         debug: Option<&mut dyn std::fmt::Write>,
     ) -> Result<VmMessageOutput, VmMessageError> {
-        self.run_vm(account, TxType::Ordinary(msg), args, debug)
+        self.call_tx_ext(account, VmCallerTxInput::Ordinary(msg), args, debug)
     }
 
     pub fn call_tick_tock(
         &self,
         account: &Account,
         tick_tock: TickTock,
+    ) -> Result<VmMessageOutput, VmMessageError> {
+        self.call_tick_tock_ext(account, tick_tock, &Default::default(), None)
+    }
+
+    pub fn call_tick_tock_ext(
+        &self,
+        account: &Account,
+        tick_tock: TickTock,
         args: &VmMessageArgs,
         debug: Option<&mut dyn std::fmt::Write>,
     ) -> Result<VmMessageOutput, VmMessageError> {
-        self.run_vm(account, TxType::TickTock(tick_tock), args, debug)
+        self.call_tx_ext(account, VmCallerTxInput::TickTock(tick_tock), args, debug)
     }
 
-    pub fn run_vm(
+    pub fn call_tx_ext(
         &self,
         account: &Account,
-        tx_type: TxType,
+        tx_type: VmCallerTxInput,
         args: &VmMessageArgs,
         debug: Option<&mut dyn std::fmt::Write>,
     ) -> Result<VmMessageOutput, VmMessageError> {
@@ -140,55 +145,45 @@ impl VmCaller {
         };
         let code = state.code.clone().ok_or(VmMessageError::NoCode)?;
 
-        let balance = args
+        let mut balance = args
             .override_balance
             .clone()
             .unwrap_or_else(|| account.balance.clone());
 
+        let address_hash = match &account.address {
+            IntAddr::Std(addr) => addr.address,
+            IntAddr::Var(_) => HashBytes::ZERO,
+        };
+
+        let is_tx_ordinary;
         let msg_lt;
-        let selector;
         let message_balance;
         let unpacked_in_msg;
-        let stack;
 
-        match tx_type {
-            TxType::TickTock(tick_tock) => {
+        let stack = match tx_type {
+            VmCallerTxInput::TickTock(ty) => {
+                is_tx_ordinary = false;
                 msg_lt = 0;
-                selector = -2;
                 message_balance = CurrencyCollection::ZERO;
                 unpacked_in_msg = None;
 
-                let addr = match &account.address {
-                    IntAddr::Std(addr) => {
-                        let mut a = BigInt::ZERO;
-                        for x in addr.address.0 {
-                            a = (a << 8) + x;
-                        }
-                        a
-                    }
-                    IntAddr::Var(_) => {
-                        return Err(VmMessageError::AccountNoStdAddress);
-                    }
-                };
-                let tick_tock_flag = match tick_tock {
-                    TickTock::Tick => 0,
-                    TickTock::Tock => -1,
-                };
-
-                stack = Stack {
-                    items: tuple![
-                        int balance.tokens,
-                        int addr,
-                        int tick_tock_flag,
-                        int selector,
-                    ],
-                };
+                tuple![
+                    int balance.tokens,
+                    int address_hash.as_bigint(),
+                    int match ty {
+                        TickTock::Tick => 0,
+                        TickTock::Tock => -1,
+                    },
+                    int -2,
+                ]
             }
-            TxType::Ordinary(msg) => {
+            VmCallerTxInput::Ordinary(msg) => {
+                is_tx_ordinary = true;
                 let parsed = msg
                     .parse::<OwnedMessage>()
                     .map_err(VmMessageError::InvalidMessage)?;
 
+                let selector;
                 match &parsed.info {
                     MsgInfo::ExtIn(_) => {
                         msg_lt = 0;
@@ -222,51 +217,80 @@ impl VmCaller {
                             }
                             .into_tuple(),
                         );
+
+                        balance.try_add_assign(&info.value).map_err(|e| match e {
+                            tycho_types::error::Error::IntOverflow => {
+                                VmMessageError::BalanceOverflow
+                            }
+                            _ => VmMessageError::InvalidMessage(e),
+                        })?;
                     }
                     MsgInfo::ExtOut(_) => return Err(VmMessageError::ExtOut),
                 }
 
-                stack = Stack {
-                    items: tuple![
-                        int balance.tokens,
-                        int message_balance.tokens,
-                        cell msg,
-                        slice parsed.body,
-                        int selector,
-                    ],
+                tuple![
+                    int balance.tokens,
+                    int message_balance.tokens,
+                    cell msg,
+                    slice parsed.body,
+                    int selector,
+                ]
+            }
+        };
+
+        let gas_params = match args.override_gas_params {
+            Some(params) => params,
+            // TODO: Replace with `GasLimitsPrices::compute_gas_params` when published.
+            None => {
+                let masterchain = account.address.is_masterchain();
+                let prices = self
+                    .config
+                    .get_gas_prices(masterchain)
+                    .map_err(VmMessageError::InvalidConfig)?;
+
+                let is_special = match args.is_special {
+                    Some(is_special) => is_special,
+                    None if masterchain => (|| {
+                        self.config
+                            .get_fundamental_addresses()?
+                            .contains_key(address_hash)
+                    })()
+                    .map_err(VmMessageError::InvalidConfig)?,
+                    None => false,
                 };
+
+                let gas_max = if is_special {
+                    prices.special_gas_limit
+                } else {
+                    gas_bought_for(&prices, &balance.tokens)
+                };
+
+                let gas_limit = if !is_tx_ordinary || is_special {
+                    // May use all gas that can be bought using remaining balance.
+                    gas_max
+                } else {
+                    // Use only gas bought using remaining message balance.
+                    // If the message is "accepted" by the smart contract,
+                    // the gas limit will be set to `gas_max`.
+                    std::cmp::min(gas_bought_for(&prices, &message_balance.tokens), gas_max)
+                };
+
+                let gas_credit = if is_tx_ordinary && unpacked_in_msg.is_none() {
+                    // External messages carry no balance,
+                    // give them some credit to check whether they are accepted.
+                    std::cmp::min(prices.gas_credit, gas_max)
+                } else {
+                    0
+                };
+
+                GasParams {
+                    max: gas_max,
+                    limit: gas_limit,
+                    credit: gas_credit,
+                    price: prices.gas_price,
+                }
             }
         };
-
-        let (address_hash, wid) = match &account.address {
-            IntAddr::Std(addr) => (addr.address, addr.workchain),
-            IntAddr::Var(_) => return Err(VmMessageError::AccountNoStdAddress),
-        };
-
-        let gas_params = args.override_gas_params.unwrap_or_else(|| {
-            let price = if wid == 0 {
-                Self::BASE_GAS_PRICE
-            } else {
-                Self::MC_GAS_PRICE
-            };
-
-            let (limit, credit) = if selector == -2 {
-                (1_000_000, 0)
-            } else if selector == 0 {
-                let message_balance =
-                    u64::try_from(message_balance.tokens.into_inner()).unwrap_or(u64::MAX);
-                (message_balance.saturating_mul(price >> 16), 0)
-            } else {
-                (0, 10000)
-            };
-
-            GasParams {
-                max: Self::MAX_GAS,
-                limit,
-                credit,
-                price
-            }
-        });
 
         let lt = std::cmp::max(account.last_trans_lt, msg_lt);
         let smc_info = SmcInfoBase::new()
@@ -274,7 +298,7 @@ impl VmCaller {
             .with_block_lt(lt)
             .with_tx_lt(lt)
             .with_mixed_rand_seed(&args.rand_seed, &address_hash)
-            .with_account_balance(account.balance.clone())
+            .with_account_balance(balance.clone())
             .with_account_addr(account.address.clone())
             .with_config(self.config.clone())
             .require_ton_v4()
@@ -296,7 +320,7 @@ impl VmCaller {
             .with_data(data)
             .with_libraries(&libraries)
             .with_init_selector(false)
-            .with_raw_stack(SafeRc::new(stack))
+            .with_raw_stack(SafeRc::new(Stack { items: stack }))
             .with_gas(gas_params)
             .with_modifiers(self.behaviour_modifiers)
             .build();
@@ -496,6 +520,10 @@ pub struct VmMessageArgs {
     ///
     /// Default: `None`.
     pub override_balance: Option<CurrencyCollection>,
+    /// Override whether the account is specia.
+    ///
+    /// Default: `None` (uses config).
+    pub is_special: Option<bool>,
 }
 
 impl Default for VmMessageArgs {
@@ -511,6 +539,7 @@ impl Default for VmMessageArgs {
             rand_seed: HashBytes::ZERO,
             override_gas_params: None,
             override_balance: None,
+            is_special: None,
         }
     }
 }
@@ -536,10 +565,10 @@ pub enum VmMessageError {
     InvalidMessage(tycho_types::error::Error),
     #[error("invalid config: {0}")]
     InvalidConfig(tycho_types::error::Error),
+    #[error("account balance overflowed")]
+    BalanceOverflow,
     #[error("account has no code")]
     NoCode,
-    #[error("account has no std address")]
-    AccountNoStdAddress,
 }
 
 #[derive(Debug)]
@@ -590,4 +619,35 @@ pub enum VmGetterError {
     NoCode,
     #[error("invalid config: {0}")]
     InvalidConfig(tycho_types::error::Error),
+}
+
+// TODO: Replace with `GasLimitsPrices::gas_bought_for` when new version is published.
+fn gas_bought_for(prices: &GasLimitsPrices, balance: &Tokens) -> u64 {
+    const fn shift_ceil_price(value: u128) -> u128 {
+        let r = value & 0xffff != 0;
+        (value >> 16) + r as u128
+    }
+
+    let balance = balance.into_inner();
+    if balance == 0 || balance < prices.flat_gas_price as u128 {
+        return 0;
+    }
+
+    let max_gas_threshold = if prices.gas_limit > prices.flat_gas_limit {
+        shift_ceil_price(
+            (prices.gas_price as u128) * (prices.gas_limit - prices.flat_gas_limit) as u128,
+        )
+        .saturating_add(prices.flat_gas_price as u128)
+    } else {
+        prices.flat_gas_price as u128
+    };
+
+    if balance >= max_gas_threshold || prices.gas_price == 0 {
+        return prices.gas_limit;
+    }
+
+    let mut res = ((balance - prices.flat_gas_price as u128) << 16) / (prices.gas_price as u128);
+    res = res.saturating_add(prices.flat_gas_limit as u128);
+
+    res.try_into().unwrap_or(u64::MAX).min(GasParams::MAX_GAS)
 }

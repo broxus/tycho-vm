@@ -1,5 +1,4 @@
 use anyhow::Result;
-use num_bigint::{BigInt, Sign};
 use tycho_types::models::{
     AccountState, AccountStatus, BlockId, ComputePhase, ComputePhaseSkipReason, CurrencyCollection,
     ExecutedComputePhase, IntAddr, IntMsgInfo, MsgType, SkippedComputePhase, StateInit, TickTock,
@@ -429,7 +428,7 @@ impl ExecutorState<'_> {
             TransactionInput::TickTock(ty) => {
                 tuple![
                     int self.balance.tokens,
-                    int BigInt::from_bytes_be(Sign::Plus, self.address.address.as_array()),
+                    int self.address.address.as_bigint(),
                     int match ty {
                         TickTock::Tick => 0,
                         TickTock::Tock => -1,
