@@ -1,9 +1,8 @@
 use num_bigint::BigInt;
 use tycho_types::crc::crc_16;
 use tycho_types::models::{
-    Account, AccountState, BlockchainConfigParams, CurrencyCollection, ExtInMsgInfo,
-    GasLimitsPrices, IntAddr, IntMsgInfo, LibDescr, MsgInfo, MsgType, OwnedMessage, StdAddr,
-    TickTock,
+    Account, AccountState, BlockchainConfigParams, ComputeGasParams, CurrencyCollection,
+    ExtInMsgInfo, IntAddr, IntMsgInfo, LibDescr, MsgInfo, MsgType, OwnedMessage, StdAddr, TickTock,
 };
 use tycho_types::num::Tokens;
 use tycho_types::prelude::*;
@@ -240,7 +239,6 @@ impl VmCaller {
 
         let gas_params = match args.override_gas_params {
             Some(params) => params,
-            // TODO: Replace with `GasLimitsPrices::compute_gas_params` when published.
             None => {
                 let masterchain = account.address.is_masterchain();
                 let prices = self
@@ -259,34 +257,18 @@ impl VmCaller {
                     None => false,
                 };
 
-                let gas_max = if is_special {
-                    prices.special_gas_limit
-                } else {
-                    gas_bought_for(&prices, &balance.tokens)
-                };
-
-                let gas_limit = if !is_tx_ordinary || is_special {
-                    // May use all gas that can be bought using remaining balance.
-                    gas_max
-                } else {
-                    // Use only gas bought using remaining message balance.
-                    // If the message is "accepted" by the smart contract,
-                    // the gas limit will be set to `gas_max`.
-                    std::cmp::min(gas_bought_for(&prices, &message_balance.tokens), gas_max)
-                };
-
-                let gas_credit = if is_tx_ordinary && unpacked_in_msg.is_none() {
-                    // External messages carry no balance,
-                    // give them some credit to check whether they are accepted.
-                    std::cmp::min(prices.gas_credit, gas_max)
-                } else {
-                    0
-                };
+                let computed = prices.compute_gas_params(ComputeGasParams {
+                    account_balance: &balance.tokens,
+                    message_balance: &message_balance.tokens,
+                    is_special,
+                    is_tx_ordinary,
+                    is_in_msg_external: unpacked_in_msg.is_none(),
+                });
 
                 GasParams {
-                    max: gas_max,
-                    limit: gas_limit,
-                    credit: gas_credit,
+                    max: computed.max,
+                    limit: computed.limit,
+                    credit: computed.credit,
                     price: prices.gas_price,
                 }
             }
@@ -620,35 +602,4 @@ pub enum VmGetterError {
     NoCode,
     #[error("invalid config: {0}")]
     InvalidConfig(tycho_types::error::Error),
-}
-
-// TODO: Replace with `GasLimitsPrices::gas_bought_for` when new version is published.
-fn gas_bought_for(prices: &GasLimitsPrices, balance: &Tokens) -> u64 {
-    const fn shift_ceil_price(value: u128) -> u128 {
-        let r = value & 0xffff != 0;
-        (value >> 16) + r as u128
-    }
-
-    let balance = balance.into_inner();
-    if balance == 0 || balance < prices.flat_gas_price as u128 {
-        return 0;
-    }
-
-    let max_gas_threshold = if prices.gas_limit > prices.flat_gas_limit {
-        shift_ceil_price(
-            (prices.gas_price as u128) * (prices.gas_limit - prices.flat_gas_limit) as u128,
-        )
-        .saturating_add(prices.flat_gas_price as u128)
-    } else {
-        prices.flat_gas_price as u128
-    };
-
-    if balance >= max_gas_threshold || prices.gas_price == 0 {
-        return prices.gas_limit;
-    }
-
-    let mut res = ((balance - prices.flat_gas_price as u128) << 16) / (prices.gas_price as u128);
-    res = res.saturating_add(prices.flat_gas_limit as u128);
-
-    res.try_into().unwrap_or(u64::MAX).min(GasParams::MAX_GAS)
 }

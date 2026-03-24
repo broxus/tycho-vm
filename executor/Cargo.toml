@@ -1,7 +1,7 @@
 [package]
 name = "tycho-executor"
 description = "TON-compatible transaction executor for the Tycho node."
-version = "0.3.3"
+version = "0.3.4"
 edition.workspace = true
 authors.workspace = true
 rust-version.workspace = true
@@ -13,7 +13,9 @@ ahash = { workspace = true }
 anyhow = { workspace = true }
 num-bigint = { workspace = true }
 thiserror = { workspace = true }
-tycho-types = { workspace = true, default-features = false, features = ["models"] }
+tycho-types = { workspace = true, default-features = false, features = [
+    "models",
+] }
 
 tycho-vm = { workspace = true }
 

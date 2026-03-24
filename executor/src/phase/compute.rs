@@ -1,7 +1,8 @@
 use anyhow::Result;
 use tycho_types::models::{
-    AccountState, AccountStatus, BlockId, ComputePhase, ComputePhaseSkipReason, CurrencyCollection,
-    ExecutedComputePhase, IntAddr, IntMsgInfo, MsgType, SkippedComputePhase, StateInit, TickTock,
+    AccountState, AccountStatus, BlockId, ComputeGasParams, ComputePhase, ComputePhaseSkipReason,
+    CurrencyCollection, ExecutedComputePhase, IntAddr, IntMsgInfo, MsgType, SkippedComputePhase,
+    StateInit, TickTock,
 };
 use tycho_types::num::Tokens;
 use tycho_types::prelude::*;
@@ -148,14 +149,20 @@ impl ExecutorState<'_> {
         let gas = if unlikely(ctx.force_accept) {
             tycho_vm::GasParams::getter()
         } else {
-            self.config.compute_gas_params(
-                &self.balance.tokens,
-                &msg_balance_remaining.tokens,
-                self.is_special,
-                is_masterchain,
-                ctx.input.is_ordinary(),
-                is_external,
-            )
+            let prices = self.config.gas_prices(is_masterchain);
+            let computed = prices.compute_gas_params(ComputeGasParams {
+                account_balance: &self.balance.tokens,
+                message_balance: &msg_balance_remaining.tokens,
+                is_special: self.is_special,
+                is_tx_ordinary: ctx.input.is_ordinary(),
+                is_in_msg_external: is_external,
+            });
+            tycho_vm::GasParams {
+                max: computed.max,
+                limit: computed.limit,
+                credit: computed.credit,
+                price: prices.gas_price,
+            }
         };
         if gas.limit == 0 && gas.credit == 0 {
             res.compute_phase = ComputePhase::Skipped(SkippedComputePhase {

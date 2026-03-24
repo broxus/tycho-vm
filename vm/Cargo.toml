@@ -1,7 +1,7 @@
 [package]
 name = "tycho-vm"
 description = "TON-compatible VM for the Tycho node."
-version = "0.3.3"
+version = "0.3.4"
 edition.workspace = true
 authors.workspace = true
 rust-version.workspace = true
@@ -35,7 +35,9 @@ thiserror = { workspace = true }
 tl-proto = { workspace = true }
 tracing = { workspace = true, optional = true }
 tycho-crypto = { workspace = true, features = ["tl-proto"] }
-tycho-types = { workspace = true, default-features = false, features = ["models"] }
+tycho-types = { workspace = true, default-features = false, features = [
+    "models",
+] }
 tycho-vm-proc = { workspace = true }
 
 [dev-dependencies]

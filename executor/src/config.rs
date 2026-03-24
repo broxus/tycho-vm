@@ -8,7 +8,7 @@ use tycho_types::models::{
 };
 use tycho_types::num::Tokens;
 use tycho_types::prelude::*;
-use tycho_vm::{GasParams, UnpackedConfig};
+use tycho_vm::UnpackedConfig;
 
 use crate::util::shift_ceil_price;
 
@@ -246,51 +246,6 @@ impl ParsedConfig {
         // Convert from fixed point int.
         Tokens::new(shift_ceil_price(total))
     }
-
-    // TODO: Replace with `GasLimitsPrices::compute_gas_params` when published.
-    /// Computes gas credit and limits bought for the provided balances.
-    pub fn compute_gas_params(
-        &self,
-        account_balance: &Tokens,
-        msg_balance_remaining: &Tokens,
-        is_special: bool,
-        is_masterchain: bool,
-        is_tx_ordinary: bool,
-        is_in_msg_external: bool,
-    ) -> GasParams {
-        let prices = self.gas_prices(is_masterchain);
-
-        let gas_max = if is_special {
-            prices.special_gas_limit
-        } else {
-            gas_bought_for(prices, account_balance)
-        };
-
-        let gas_limit = if !is_tx_ordinary || is_special {
-            // May use all gas that can be bought using remaining balance.
-            gas_max
-        } else {
-            // Use only gas bought using remaining message balance.
-            // If the message is "accepted" by the smart contract,
-            // the gas limit will be set to `gas_max`.
-            std::cmp::min(gas_bought_for(prices, msg_balance_remaining), gas_max)
-        };
-
-        let gas_credit = if is_tx_ordinary && is_in_msg_external {
-            // External messages carry no balance,
-            // give them some credit to check whether they are accepted.
-            std::cmp::min(prices.gas_credit, gas_max)
-        } else {
-            0
-        };
-
-        GasParams {
-            max: gas_max,
-            limit: gas_limit,
-            credit: gas_credit,
-            price: prices.gas_price,
-        }
-    }
 }
 
 fn parse_storage_prices(
@@ -319,32 +274,6 @@ fn parse_storage_prices(
 struct ParsedStoragePrices {
     latest_storage_prices: Option<CellSliceParts>,
     storage_prices: Vec<StoragePrices>,
-}
-
-// TODO: Replace with `GasLimitsPrices::gas_bought_for` when new version is published.
-fn gas_bought_for(prices: &GasLimitsPrices, balance: &Tokens) -> u64 {
-    let balance = balance.into_inner();
-    if balance == 0 || balance < prices.flat_gas_price as u128 {
-        return 0;
-    }
-
-    let max_gas_threshold = if prices.gas_limit > prices.flat_gas_limit {
-        shift_ceil_price(
-            (prices.gas_price as u128) * (prices.gas_limit - prices.flat_gas_limit) as u128,
-        )
-        .saturating_add(prices.flat_gas_price as u128)
-    } else {
-        prices.flat_gas_price as u128
-    };
-
-    if balance >= max_gas_threshold || prices.gas_price == 0 {
-        return prices.gas_limit;
-    }
-
-    let mut res = ((balance - prices.flat_gas_price as u128) << 16) / (prices.gas_price as u128);
-    res = res.saturating_add(prices.flat_gas_limit as u128);
-
-    res.try_into().unwrap_or(u64::MAX).min(GasParams::MAX_GAS)
 }
 
 #[derive(Debug, Clone)]
