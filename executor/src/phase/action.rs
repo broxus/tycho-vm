@@ -398,7 +398,7 @@ impl ExecutorState<'_> {
 
         // Apply rewrite.
         let rewritten_state_init_cb;
-        if let Some(MessageRewrite::StateInitToCell) = rewrite {
+        if rewrite.is_some() {
             if state_init_cs.size_refs() >= 2 {
                 // Move state init to cell if it is more optimal.
                 rewritten_state_init_cb = rewrite_state_init_to_cell(state_init_cs);
