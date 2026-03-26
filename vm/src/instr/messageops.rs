@@ -1,6 +1,6 @@
 use num_bigint::{BigInt, Sign};
 use num_traits::ToPrimitive;
-use tycho_types::cell::{self, CellTreeStats, Lazy, LoadMode, StorageStat};
+use tycho_types::cell::{self, CellTreeStats, Lazy, LoadMode, RefsIter, StorageStat};
 use tycho_types::dict;
 use tycho_types::models::{
     ChangeLibraryMode, CurrencyCollection, ExtAddr, ExtraCurrencyCollection, LibRef,
@@ -158,7 +158,7 @@ impl MessageOps {
             None => {
                 let config_root = ok!(t1.try_get_ref::<Cell>(SmcInfoBase::CONFIG_IDX));
 
-                let mut b = CellBuilder::new();
+                let mut b = CellDataBuilder::new();
                 b.store_u32(if is_masterchain { 24 } else { 25 }).unwrap();
                 let key = b.as_data_slice();
 
@@ -183,7 +183,10 @@ impl MessageOps {
             None => 1 << 13,
         };
         let mut stats = {
-            let mut stats = StorageStat::with_limit(max_cells as _);
+            // NOTE: Message slice is loaded twice in the original implementation.
+            st.gas.load_dyn_cell(msg_cell.as_ref(), LoadMode::UseGas)?;
+
+            let mut stats = StorageStatWithGas::with_limit(max_cells as _, &st.gas);
             let mut cs = msg_cell.as_slice()?;
             cs.skip_first(cs.size_bits(), 0).ok();
 
@@ -192,7 +195,7 @@ impl MessageOps {
             }
 
             stats.add_slice(&cs);
-            stats.stats()
+            stats.stats
         };
 
         // Adjust outgoing message value and extra currencies.
@@ -328,6 +331,65 @@ impl MessageOps {
         } else {
             Ok(0)
         }
+    }
+}
+
+struct StorageStatWithGas<'a, 'l> {
+    visited: ahash::HashSet<&'a HashBytes>,
+    stack: Vec<RefsIter<'a>>,
+    stats: CellTreeStats,
+    limit: usize,
+    gas: &'a GasConsumer<'l>,
+}
+
+impl<'a, 'l> StorageStatWithGas<'a, 'l> {
+    fn with_limit(limit: usize, gas: &'a GasConsumer<'l>) -> Self {
+        Self {
+            visited: Default::default(),
+            stack: Vec::new(),
+            stats: CellTreeStats::ZERO,
+            limit,
+            gas,
+        }
+    }
+
+    fn add_slice(&mut self, slice: &CellSlice<'a>) -> bool {
+        self.stats.bit_count += slice.size_bits() as u64;
+
+        self.stack.clear();
+        self.stack.push(slice.references());
+        self.reduce_stack()
+    }
+
+    fn reduce_stack(&mut self) -> bool {
+        'outer: while let Some(item) = self.stack.last_mut() {
+            for cell in item.by_ref() {
+                if !self.visited.insert(cell.repr_hash()) {
+                    continue;
+                }
+
+                if self.stats.cell_count >= self.limit as u64 {
+                    return false;
+                }
+
+                if self.gas.load_dyn_cell(cell, LoadMode::UseGas).is_err() {
+                    return false;
+                }
+
+                self.stats.bit_count += cell.bit_len() as u64;
+                self.stats.cell_count += 1;
+
+                let next = cell.references();
+                if cell.reference_count() > 0 {
+                    self.stack.push(next);
+                    continue 'outer;
+                }
+            }
+
+            self.stack.pop();
+        }
+
+        true
     }
 }
 
