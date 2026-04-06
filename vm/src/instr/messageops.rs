@@ -1,6 +1,6 @@
 use num_bigint::{BigInt, Sign};
 use num_traits::ToPrimitive;
-use tycho_types::cell::{self, CellTreeStats, Lazy, LoadMode, RefsIter, StorageStat};
+use tycho_types::cell::{self, CellTreeStats, Lazy, LoadMode, RefsIter};
 use tycho_types::dict;
 use tycho_types::models::{
     ChangeLibraryMode, CurrencyCollection, ExtAddr, ExtraCurrencyCollection, LibRef,
