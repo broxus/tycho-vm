@@ -162,14 +162,10 @@ impl SmcInfoBase {
     }
 
     pub fn with_mixed_rand_seed(mut self, block_seed: &HashBytes, account: &HashBytes) -> Self {
-        if *block_seed == HashBytes::ZERO {
-            self.rand_seed = HashBytes::ZERO;
-        } else {
-            let mut hasher = sha2::Sha256::new();
-            hasher.update(block_seed.as_array());
-            hasher.update(account.as_array());
-            self.rand_seed = HashBytes(hasher.finalize().into());
-        }
+        let mut hasher = sha2::Sha256::new();
+        hasher.update(block_seed.as_array());
+        hasher.update(account.as_array());
+        self.rand_seed = HashBytes(hasher.finalize().into());
         self
     }
 
