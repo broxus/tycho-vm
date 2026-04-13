@@ -621,7 +621,7 @@ impl<'l> GasConsumer<'l> {
     ) -> Result<T, Error> {
         let mut library_loaded = false;
         loop {
-            if mode.use_gas() {
+            if mode.use_gas() && !library_loaded {
                 // SAFETY: This is the only place where we borrow `loaded_cells` as mut.
                 let is_new =
                     unsafe { (*self.loaded_cells.get()).insert(*cell.as_ref().repr_hash()) };
@@ -717,7 +717,7 @@ impl LimitedGasConsumer<'_> {
     ) -> Result<T, Error> {
         let mut library_loaded = false;
         loop {
-            if mode.use_gas() {
+            if mode.use_gas() && !library_loaded {
                 // SAFETY: This is the only place where we borrow `loaded_cells` as mut.
                 let is_new =
                     unsafe { (*self.gas.loaded_cells.get()).insert(*cell.as_ref().repr_hash()) };

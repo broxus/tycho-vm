@@ -1910,7 +1910,7 @@ mod tests {
         assert!(!compute_phase.msg_state_used);
         assert!(!compute_phase.account_activated);
         assert_eq!(compute_phase.gas_fees, expected_gas_fee);
-        assert_eq!(compute_phase.gas_used, 285);
+        assert_eq!(compute_phase.gas_used, 185);
         assert_eq!(
             compute_phase.gas_limit,
             VarUint56::new(config.gas_prices.gas_limit)
