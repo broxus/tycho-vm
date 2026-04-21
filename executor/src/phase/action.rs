@@ -355,12 +355,6 @@ impl ExecutorState<'_> {
             ctx.need_bounce_on_fail = true;
         }
 
-        if mode.bits() & !MASK != 0 || mode.contains(INVALID_MASK) {
-            // - Mode has some unknown bits;
-            // - Or "ALL_BALANCE" flag was used with "WITH_REMAINING_BALANCE".
-            return Err(ActionFailed);
-        }
-
         // We should only skip if at least the mode is correct.
         let skip_invalid = mode.contains(SendMsgFlags::IGNORE_ERROR);
         let check_skip_invalid = |e: ResultCode, ctx: &mut ActionContext<'_>| {
@@ -372,6 +366,12 @@ impl ExecutorState<'_> {
                 Err(ActionFailed)
             }
         };
+
+        if mode.bits() & !MASK != 0 || mode.contains(INVALID_MASK) {
+            // - Mode has some unknown bits;
+            // - Or "ALL_BALANCE" flag was used with "WITH_REMAINING_BALANCE".
+            return check_skip_invalid(ResultCode::ActionInvalid, ctx);
+        }
 
         // Output message must be an ordinary cell.
         if out_msg.is_exotic() {
@@ -387,7 +387,16 @@ impl ExecutorState<'_> {
             let mut cs = out_msg.as_slice_allow_exotic();
 
             relaxed_info = RelaxedMsgInfo::load_from(&mut cs)?;
-            state_init_cs = load_state_init_as_slice(&mut cs)?;
+            // NOTE: Only visit all libraries on the first attempt.
+            state_init_cs = match load_state_init_as_slice(&mut cs, rewrite.is_none()) {
+                Ok(cs) => cs,
+                // Invalid StateInit leads to a skipped action.
+                Err(LoadStateInitError::BadStateInit) => {
+                    return check_skip_invalid(ResultCode::ActionInvalid, ctx);
+                }
+                // Invalid message structure leads to a failed action.
+                Err(LoadStateInitError::Other) => return Err(ActionFailed),
+            };
             body_cs = load_body_as_slice(&mut cs)?;
 
             if !cs.is_empty() {
@@ -426,9 +435,7 @@ impl ExecutorState<'_> {
             RelaxedMsgInfo::Int(info) => {
                 // Rewrite source address.
                 if !check_rewrite_src_addr(&self.address, &mut info.src) {
-                    // NOTE: For some reason we are not ignoring this error.
-                    ctx.action_phase.result_code = ResultCode::InvalidSrcAddr as i32;
-                    return Err(ActionFailed);
+                    return check_skip_invalid(ResultCode::InvalidSrcAddr, ctx);
                 };
 
                 // Rewrite destination address.
@@ -468,13 +475,12 @@ impl ExecutorState<'_> {
             RelaxedMsgInfo::ExtOut(info) => {
                 if mode.bits() & !EXT_MSG_MASK != 0 {
                     // Invalid mode for an outgoing external message.
-                    return Err(ActionFailed);
+                    return check_skip_invalid(ResultCode::ActionInvalid, ctx);
                 }
 
                 // Rewrite source address.
                 if !check_rewrite_src_addr(&self.address, &mut info.src) {
-                    ctx.action_phase.result_code = ResultCode::InvalidSrcAddr as i32;
-                    return Err(ActionFailed);
+                    return check_skip_invalid(ResultCode::InvalidSrcAddr, ctx);
                 }
 
                 // Rewrite message timings.
@@ -1047,37 +1053,70 @@ impl MessageRewrite {
     }
 }
 
-fn load_state_init_as_slice<'a>(cs: &mut CellSlice<'a>) -> Result<CellSlice<'a>, Error> {
+fn load_state_init_as_slice<'a>(
+    cs: &mut CellSlice<'a>,
+    check_libs: bool,
+) -> Result<CellSlice<'a>, LoadStateInitError> {
     let mut res_cs = *cs;
 
     // (Maybe (Either StateInit ^StateInit))
     if cs.load_bit()? {
-        if cs.load_bit()? {
+        let libs = if cs.load_bit()? {
             // right$1 ^StateInit
             let state_root = cs.load_reference()?;
             if state_root.is_exotic() {
                 // Only ordinary cells are allowed as state init.
-                return Err(Error::InvalidData);
+                return Err(LoadStateInitError::BadStateInit);
             }
 
             // Validate `StateInit` by reading.
             let mut cs = state_root.as_slice_allow_exotic();
-            StateInit::load_from(&mut cs)?;
+            let Ok(state) = StateInit::load_from(&mut cs) else {
+                return Err(LoadStateInitError::BadStateInit);
+            };
 
             // And ensure that nothing more was left.
             if !cs.is_empty() {
-                return Err(Error::CellOverflow);
+                return Err(LoadStateInitError::BadStateInit);
             }
+
+            state.libraries
         } else {
             // left$0 StateInit
 
             // Validate `StateInit` by reading.
-            StateInit::load_from(cs)?;
+            match StateInit::load_from(cs) {
+                Ok(state) => state.libraries,
+                Err(_) => return Err(LoadStateInitError::BadStateInit),
+            }
+        };
+
+        if check_libs {
+            for item in libs.iter() {
+                let Ok((key, value)) = item else {
+                    return Err(LoadStateInitError::BadStateInit);
+                };
+                if &key != value.root.repr_hash() {
+                    return Err(LoadStateInitError::BadStateInit);
+                }
+            }
         }
     }
 
     res_cs.skip_last(cs.size_bits(), cs.size_refs())?;
     Ok(res_cs)
+}
+
+enum LoadStateInitError {
+    BadStateInit,
+    Other,
+}
+
+impl From<Error> for LoadStateInitError {
+    #[inline]
+    fn from(_: Error) -> Self {
+        Self::Other
+    }
 }
 
 fn load_body_as_slice<'a>(cs: &mut CellSlice<'a>) -> Result<CellSlice<'a>, Error> {
@@ -2780,7 +2819,7 @@ mod tests {
                     (*root.repr_hash(), SimpleLib { root, public })
                 })
                 .collect::<Vec<_>>();
-            items.sort_by(|(a, _), (b, _)| a.cmp(b));
+            items.sort_by_key(|(a, _)| *a);
             Dict::try_from_sorted_slice(&items).unwrap()
         }
 

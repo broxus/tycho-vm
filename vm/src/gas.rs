@@ -851,7 +851,7 @@ mod tests {
                 root: lib2.clone(),
             }),
         ];
-        libraries.sort_unstable_by(|(l, _), (r, _)| l.cmp(r));
+        libraries.sort_unstable_by_key(|(l, _)| *l);
         let libraries = Dict::<HashBytes, SimpleLib>::try_from_sorted_slice(&libraries).unwrap();
 
         assert!(libraries.find(&HashBytes::ZERO).unwrap().is_none());
@@ -891,7 +891,7 @@ mod tests {
                 publishers,
             }),
         ];
-        libraries.sort_unstable_by(|(l, _), (r, _)| l.cmp(r));
+        libraries.sort_unstable_by_key(|(l, _)| *l);
 
         let libraries = Dict::<HashBytes, LibDescr>::try_from_sorted_slice(&libraries).unwrap();
 

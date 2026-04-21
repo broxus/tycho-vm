@@ -884,4 +884,58 @@ mod tests {
             b.build().unwrap()
         }
     }
+
+    /// Can be used to replay TON transactions on the Tycho executor.
+    #[allow(unused)]
+    fn replay_tx(config: &str, state: &str, msg: &str, lt: u64, now: u32) -> Result<()> {
+        use tycho_types::models::*;
+
+        let mut config: BlockchainConfig = BocRepr::decode_base64(config)?;
+        let state: ShardAccount = BocRepr::decode_base64(state)?;
+        let msg = Boc::decode_base64(msg)?;
+
+        let mut workchains = Dict::<i32, _>::new();
+        workchains.set(0, WorkchainDescription {
+            enabled_since: 0,
+            actual_min_split: 0,
+            min_split: 0,
+            max_split: 0,
+            active: true,
+            accept_msgs: true,
+            zerostate_root_hash: HashBytes::ZERO,
+            zerostate_file_hash: HashBytes::ZERO,
+            version: 0,
+            format: WorkchainFormat::Basic(WorkchainFormatBasic {
+                vm_mode: 0,
+                vm_version: 0,
+            }),
+        })?;
+        config.params.set_workchains(&workchains)?;
+        config.params.remove(43)?;
+
+        let (is_external, address) = match msg.parse::<MsgInfo>()? {
+            MsgInfo::Int(info) => (false, info.dst),
+            MsgInfo::ExtIn(info) => (true, info.dst),
+            MsgInfo::ExtOut(_) => anyhow::bail!("unexpected message"),
+        };
+        let IntAddr::Std(address) = address else {
+            anyhow::bail!("unexpected address");
+        };
+
+        let params = ExecutorParams {
+            block_unixtime: now,
+            ..Default::default()
+        };
+
+        let parsed_config = ParsedConfig::parse(config, now).context("failed to parse config")?;
+        let output = Executor::new(&params, &parsed_config)
+            .with_min_lt(lt)
+            .begin_ordinary(&address, is_external, msg, &state)?
+            .commit()?;
+
+        let tx = output.transaction.load()?;
+        let tx_info = tx.load_info()?;
+        println!("{tx_info:#?}");
+        Ok(())
+    }
 }

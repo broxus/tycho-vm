@@ -18,11 +18,7 @@ pub fn tokenize(mut text: &str) -> Result<OpcodeTokens, LexerError> {
 
     let mut has_comma = false;
     let mut lexer = Lexer::new(args);
-    loop {
-        let Some(first_char) = lexer.bump() else {
-            break;
-        };
-
+    while let Some(first_char) = lexer.bump() {
         match first_char {
             // ci - control registers
             'c' => {
