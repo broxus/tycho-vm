@@ -219,7 +219,11 @@ impl MessageOps {
         // Compute fees and final message layout.
         let update_fees = |stats: CellTreeStats, fwd_fee: &mut Tokens| {
             let fwd_fee_short = prices.compute_fwd_fee(stats);
-            *fwd_fee = std::cmp::max(fwd_fee_short, user_fwd_fee);
+            *fwd_fee = if st.version.is_ton(14..) {
+                fwd_fee_short
+            } else {
+                std::cmp::max(fwd_fee_short, user_fwd_fee)
+            };
         };
 
         let compute_msg_root_bits =

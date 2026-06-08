@@ -157,6 +157,10 @@ impl ExecutorState<'_> {
 
         // Action list itself is ok.
         res.action_phase.valid = true;
+        let pre_action_balance = ctx
+            .received_message
+            .as_ref()
+            .map(|msg| msg.balance_remaining.clone());
 
         // Execute actions.
         let mut action_ctx = ActionContext {
@@ -231,6 +235,13 @@ impl ExecutorState<'_> {
                 // Apply flags.
                 res.bounce |= action_ctx.need_bounce_on_fail;
 
+                if self.config.global.version >= 14
+                    && let Some(msg) = action_ctx.received_message.as_deref_mut()
+                    && let Some(balance) = pre_action_balance
+                {
+                    msg.balance_remaining = balance;
+                }
+
                 // Ignore all other action.
                 return Ok(res);
             }
@@ -268,6 +279,13 @@ impl ExecutorState<'_> {
                 )?;
 
                 // Apply flags.
+                if self.config.global.version >= 14
+                    && let Some(msg) = action_ctx.received_message.as_deref_mut()
+                    && let Some(balance) = pre_action_balance
+                {
+                    msg.balance_remaining = balance;
+                }
+                
                 res.bounce |= action_ctx.need_bounce_on_fail;
                 res.action_phase.result_code = ResultCode::StateOutOfLimits as i32;
                 res.state_exceeds_limits = true;
