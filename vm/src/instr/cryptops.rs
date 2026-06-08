@@ -170,6 +170,13 @@ impl CryptOps {
         st.gas.try_consume_check_signature_gas()?;
 
         let is_valid = 'valid: {
+            if st.version.is_ton(14..)
+                && key_bytes[0] == 1
+                && key_bytes[1..].iter().all(|v| *v == 0)
+            {
+                break 'valid false;
+            }
+
             let Some(pubkey) =
                 ed25519::PublicKey::from_bytes(key_bytes.as_slice().try_into().unwrap())
             else {
