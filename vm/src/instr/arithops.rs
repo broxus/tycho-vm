@@ -2,7 +2,7 @@ use std::cmp::Ordering;
 
 use num_bigint::{BigInt, Sign};
 use num_integer::Integer;
-use num_traits::Zero;
+use num_traits::{ToPrimitive, Zero};
 #[cfg(feature = "dump")]
 use tycho_types::prelude::*;
 use tycho_vm_proc::vm_module;
@@ -353,11 +353,18 @@ impl ArithOps {
 
         let stack = SafeRc::make_mut(&mut st.stack);
         let y = match y {
-            Some(y) => y,
-            None => ok!(stack.pop_smallint_range(0, 256)),
+            Some(y) => Some(y),
+            None if quiet && st.version.is_ton(14..) => {
+                if let Some(item) = ok!(stack.pop_int_or_nan()) {
+                    item.to_u32().filter(|item| (0..=256).contains(item))
+                } else {
+                    None
+                }
+            }
+            None => Some(ok!(stack.pop_smallint_range(0, 256))),
         };
 
-        if y == 0 {
+        if y == Some(0) {
             round_mode = RoundMode::Floor;
         }
         let w = if add {
@@ -366,8 +373,14 @@ impl ArithOps {
             None
         };
 
-        match ok!(stack.pop_int_or_nan()) {
-            Some(mut x) => match operation {
+        match (ok!(stack.pop_int_or_nan()), y) {
+            (_, None) if quiet => {
+                ok!(stack.push_nan());
+                if let Operation::RShiftMod = operation {
+                    ok!(stack.push_nan());
+                }
+            }
+            (Some(mut x), Some(y)) => match operation {
                 Operation::RShift => {
                     let res = int_rshift(&x, y, round_mode);
                     ok!(stack.push_raw_int(update_or_new_rc(x, res), quiet));
@@ -394,7 +407,7 @@ impl ArithOps {
                     ok!(stack.push_raw_int(SafeRc::new(r), quiet));
                 }
             },
-            _ if quiet => {
+            (None, _) if quiet => {
                 ok!(stack.push_nan());
                 if let Operation::RShiftMod = operation {
                     ok!(stack.push_nan());

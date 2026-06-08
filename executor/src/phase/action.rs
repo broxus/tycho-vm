@@ -285,7 +285,7 @@ impl ExecutorState<'_> {
                 {
                     msg.balance_remaining = balance;
                 }
-                
+
                 res.bounce |= action_ctx.need_bounce_on_fail;
                 res.action_phase.result_code = ResultCode::StateOutOfLimits as i32;
                 res.state_exceeds_limits = true;
