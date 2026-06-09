@@ -700,6 +700,15 @@ mod test {
 
     #[test]
     #[traced_test]
+    fn store_std_opt_address_bad_type_test() {
+        let builder = CellBuilder::new();
+        let rc_buider = SafeRc::new_dyn_value(builder);
+
+        assert_run_vm!("STOPTSTDADDRQ", [int 100, raw rc_buider.clone()] => [int 100, raw rc_buider, int -1]);
+    }
+
+    #[test]
+    #[traced_test]
     fn load_varint_u16_test() -> anyhow::Result<()> {
         let int = BigInt::from(5);
         let mut builder = CellBuilder::new();

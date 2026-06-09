@@ -197,15 +197,25 @@ impl ControlRegs {
     }
 
     pub fn define(&mut self, i: usize, value: RcStackValue) -> VmResult<()> {
+        self.define_ext(i, value, false)
+    }
+
+    pub fn define_ext(&mut self, i: usize, value: RcStackValue, silent: bool) -> VmResult<()> {
         if i < Self::CONT_REG_COUNT {
             let cont = ok!(value.into_cont());
-            vm_ensure!(self.c[i].is_none(), ControlRegisterRedefined);
-            self.c[i] = Some(cont);
+            if self.c[i].is_none() {
+                self.c[i] = Some(cont);
+            } else {
+                vm_ensure!(silent, ControlRegisterRedefined);
+            }
         } else if Self::DATA_REG_RANGE.contains(&i) {
             let cell = ok!(value.into_cell());
             let d = &mut self.d[i - Self::DATA_REG_OFFSET];
-            vm_ensure!(d.is_none(), ControlRegisterRedefined);
-            *d = Some(SafeRc::unwrap_or_clone(cell));
+            if d.is_none() {
+                *d = Some(SafeRc::unwrap_or_clone(cell));
+            } else {
+                vm_ensure!(silent, ControlRegisterRedefined);
+            }
         } else if i == 7 {
             let tuple = ok!(value.into_tuple());
 

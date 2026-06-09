@@ -690,6 +690,52 @@ mod tests {
 
     #[test]
     #[traced_test]
+    fn chksign_rejects_identity_pubkey_v14() {
+        use crate::VmVersion;
+        let data = [];
+        let mut signature = [0; 64];
+        signature[0] = 1;
+        let mut identity = [0; 32];
+        identity[0] = 1;
+
+        assert_run_vm!(
+            "CHKSIGNS",
+            state: |st| st.version = VmVersion::Ton(13),
+            [
+                raw build_slice(data),
+                raw build_slice(signature),
+                raw build_int(identity),
+            ] => [int -1]
+        );
+        assert_run_vm!(
+            "CHKSIGNS",
+            [
+                raw build_slice(data),
+                raw build_slice(signature),
+                raw build_int(identity),
+            ] => [int 0]
+        );
+        assert_run_vm!(
+            "CHKSIGNU",
+            state: |st| st.version = VmVersion::Ton(13),
+            [
+                int 0,
+                raw build_slice(signature),
+                raw build_int(identity),
+            ] => [int -1]
+        );
+        assert_run_vm!(
+            "CHKSIGNU",
+            [
+                int 0,
+                raw build_slice(signature),
+                raw build_int(identity),
+            ] => [int 0]
+        );
+    }
+
+    #[test]
+    #[traced_test]
     fn signdomain_stack_only() {
         assert_run_vm!("SIGNDOMAIN", [] => [null]);
         assert_run_vm!("SIGNDOMAIN_POP", [] => [null]);

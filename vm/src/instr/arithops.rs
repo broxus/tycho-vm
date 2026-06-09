@@ -1277,6 +1277,8 @@ mod tests {
         assert_run_vm!("MODPOW2", [nan, int 3] => [int 0], exit_code: 4);
         assert_run_vm!("QUIET MODPOW2", [int 5, int 2] => [int 1]);
         assert_run_vm!("QUIET MODPOW2", [nan, int 3] => [nan]);
+        assert_run_vm!("QUIET MODPOW2", [int 5, nan] => [nan]);
+        assert_run_vm!("QUIET MODPOW2", [int 5, int 257] => [nan]);
 
         assert_run_vm!("RSHIFTMOD", [int 5, int 2] => [int 1, int 1]);
         assert_run_vm!("RSHIFTMOD", [int 5, int 0] => [int 5, int 0]);
@@ -1286,6 +1288,8 @@ mod tests {
         assert_run_vm!("RSHIFTMOD", [nan, int 3] => [int 0], exit_code: 4);
         assert_run_vm!("QUIET RSHIFTMOD", [int 5, int 2] => [int 1, int 1]);
         assert_run_vm!("QUIET RSHIFTMOD", [nan, int 3] => [nan, nan]);
+        assert_run_vm!("QUIET RSHIFTMOD", [int 5, nan] => [nan, nan]);
+        assert_run_vm!("QUIET RSHIFTMOD", [int 5, int 257] => [nan, nan]);
 
         assert_run_vm!("ADDRSHIFTMOD", [int 3, int 2, int 2] => [int 1, int 1]);
         assert_run_vm!("ADDRSHIFTMOD", [int 3, int 2, int 0] => [int 5, int 0]);
@@ -1297,6 +1301,8 @@ mod tests {
         assert_run_vm!("QUIET ADDRSHIFTMOD", [int 3, int 2, int 2] => [int 1, int 1]);
         assert_run_vm!("QUIET ADDRSHIFTMOD", [nan, int 1, int 3] => [nan, nan]);
         assert_run_vm!("QUIET ADDRSHIFTMOD", [int 1, nan, int 3] => [nan, nan]);
+        assert_run_vm!("QUIET ADDRSHIFTMOD", [int 3, int 2, nan] => [nan, nan]);
+        assert_run_vm!("QUIET ADDRSHIFTMOD", [int 3, int 2, int 257] => [nan, nan]);
     }
 
     // TODO: Add more tests
