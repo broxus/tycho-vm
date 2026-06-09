@@ -748,7 +748,9 @@ impl ContOps {
         let stack = SafeRc::make_mut(&mut st.stack);
         let mut cont = ok!(stack.pop_cont());
         let value = ok!(stack.pop());
-        ok!(force_cdata(&mut cont).save.define(i as _, value));
+        ok!(force_cdata(&mut cont)
+            .save
+            .define_ext(i as _, value, st.version.is_ton(14..)));
         ok!(stack.push_raw(cont));
         Ok(0)
     }
@@ -758,7 +760,9 @@ impl ContOps {
         vm_ensure!(ControlRegs::is_valid_idx(i as _), InvalidOpcode);
         let cont = st.cr.c[0].as_mut().expect("c0 should always be set");
         let value = ok!(SafeRc::make_mut(&mut st.stack).pop());
-        ok!(force_cdata(cont).save.define(i as _, value));
+        ok!(force_cdata(cont)
+            .save
+            .define_ext(i as _, value, st.version.is_ton(14..)));
         Ok(0)
     }
 
@@ -768,7 +772,9 @@ impl ContOps {
         // TODO: Check if c1 is always set
         let cont = st.cr.c[1].as_mut().expect("c1 should always be set");
         let value = ok!(SafeRc::make_mut(&mut st.stack).pop());
-        ok!(force_cdata(cont).save.define(i as _, value));
+        ok!(force_cdata(cont)
+            .save
+            .define_ext(i as _, value, st.version.is_ton(14..)));
         Ok(0)
     }
 
@@ -818,7 +824,9 @@ impl ContOps {
             .get_as_stack_value(i as _)
             .unwrap_or_else(Stack::make_null);
 
-        ok!(force_cdata(&mut c0).save.define(i as _, value));
+        ok!(force_cdata(&mut c0)
+            .save
+            .define_ext(i as _, value, st.version.is_ton(14..)));
         st.cr.c[0] = Some(c0);
         Ok(0)
     }
@@ -835,7 +843,9 @@ impl ContOps {
             .get_as_stack_value(i as _)
             .unwrap_or_else(Stack::make_null);
 
-        ok!(force_cdata(&mut c1).save.define(i as _, value));
+        ok!(force_cdata(&mut c1)
+            .save
+            .define_ext(i as _, value, st.version.is_ton(14..)));
         st.cr.c[1] = Some(c1);
         Ok(0)
     }
@@ -895,7 +905,9 @@ impl ContOps {
         );
         let mut cont = ok!(stack.pop_cont());
         let value = ok!(stack.pop());
-        ok!(force_cdata(&mut cont).save.define(idx, value));
+        ok!(force_cdata(&mut cont)
+            .save
+            .define_ext(idx, value, st.version.is_ton(14..)));
         ok!(stack.push_raw(cont));
         Ok(0)
     }
@@ -925,7 +937,9 @@ impl ContOps {
                     actual: StackValueType::Null as _
                 })
             };
-            ok!(force_cdata(&mut cont).save.define(i, st_value));
+            ok!(force_cdata(&mut cont)
+                .save
+                .define_ext(i, st_value, st.version.is_ton(14..)));
         }
 
         ok!(stack.push_raw(cont));
@@ -2194,6 +2208,23 @@ mod tests {
             RETURNARGS 0
             "#,
             [] => [int 0],
+        );
+    }
+
+    #[test]
+    #[traced_test]
+    fn control_savelist_redefinition() {
+        assert_run_vm!(
+            r#"
+            PUSHREF x{1111}
+            PUSHCONT { PUSH c4 CTOS }
+            SETCONTCTR c4
+            PUSHREF x{2222}
+            SWAP
+            SETCONTCTR c4
+            EXECUTE
+            "#,
+            [] => [slice make_slice(0x1111_u16)]
         );
     }
 

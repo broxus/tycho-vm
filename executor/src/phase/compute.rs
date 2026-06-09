@@ -306,7 +306,7 @@ impl ExecutorState<'_> {
 
         // NOTE: Not all versions change the smc info, so we need to bump
         // this value manually.
-        let real_version = tycho_vm::VmVersion::Ton(12);
+        let real_version = tycho_vm::VmVersion::Ton(14);
 
         if let Some(inspector) = ctx.inspector.as_deref_mut()
             && let Some(modify_smc_info) = inspector.modify_smc_info.as_deref_mut()

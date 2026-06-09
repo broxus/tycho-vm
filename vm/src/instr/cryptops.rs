@@ -170,6 +170,13 @@ impl CryptOps {
         st.gas.try_consume_check_signature_gas()?;
 
         let is_valid = 'valid: {
+            if st.version.is_ton(14..)
+                && key_bytes[0] == 1
+                && key_bytes[1..].iter().all(|v| *v == 0)
+            {
+                break 'valid false;
+            }
+
             let Some(pubkey) =
                 ed25519::PublicKey::from_bytes(key_bytes.as_slice().try_into().unwrap())
             else {
@@ -679,6 +686,52 @@ mod tests {
         );
 
         Ok(())
+    }
+
+    #[test]
+    #[traced_test]
+    fn chksign_rejects_identity_pubkey_v14() {
+        use crate::VmVersion;
+        let data = [];
+        let mut signature = [0; 64];
+        signature[0] = 1;
+        let mut identity = [0; 32];
+        identity[0] = 1;
+
+        assert_run_vm!(
+            "CHKSIGNS",
+            state: |st| st.version = VmVersion::Ton(13),
+            [
+                raw build_slice(data),
+                raw build_slice(signature),
+                raw build_int(identity),
+            ] => [int -1]
+        );
+        assert_run_vm!(
+            "CHKSIGNS",
+            [
+                raw build_slice(data),
+                raw build_slice(signature),
+                raw build_int(identity),
+            ] => [int 0]
+        );
+        assert_run_vm!(
+            "CHKSIGNU",
+            state: |st| st.version = VmVersion::Ton(13),
+            [
+                int 0,
+                raw build_slice(signature),
+                raw build_int(identity),
+            ] => [int -1]
+        );
+        assert_run_vm!(
+            "CHKSIGNU",
+            [
+                int 0,
+                raw build_slice(signature),
+                raw build_int(identity),
+            ] => [int 0]
+        );
     }
 
     #[test]

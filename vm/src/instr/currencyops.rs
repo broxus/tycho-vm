@@ -10,7 +10,7 @@ use crate::gas::GasConsumer;
 use crate::instr::cellops::{finish_store_ok, finish_store_overflow};
 use crate::saferc::SafeRc;
 use crate::smc_info::VmVersion;
-use crate::stack::{RcStackValue, Stack, StackValue, Tuple};
+use crate::stack::{RcStackValue, Stack, StackValue, StackValueType, Tuple};
 use crate::state::VmState;
 use crate::util::{OwnedCellSlice, load_uint_leq};
 
@@ -246,28 +246,37 @@ impl CurrencyOps {
     fn exec_store_opt_std_address(st: &mut VmState, quiet: bool) -> VmResult<i32> {
         let stack = SafeRc::make_mut(&mut st.stack);
         let mut builder: SafeRc<CellBuilder> = ok!(stack.pop_builder());
-        match ok!(stack.pop_cs_opt()) {
-            None => {
-                if !builder.has_capacity(2, 0) {
-                    return finish_store_overflow(stack, SafeRc::new(()), builder, quiet);
-                }
+        let value = ok!(stack.pop());
+        if value.is_null() {
+            if !builder.has_capacity(2, 0) {
+                return finish_store_overflow(stack, SafeRc::new(()), builder, quiet);
+            }
 
-                SafeRc::make_mut(&mut builder).store_zeros(2)?;
-                ok!(stack.push_raw(builder));
-                if quiet {
-                    ok!(stack.push_bool(false));
-                }
-                Ok(0)
+            SafeRc::make_mut(&mut builder).store_zeros(2)?;
+            ok!(stack.push_raw(builder));
+            if quiet {
+                ok!(stack.push_bool(false));
             }
-            Some(csr) => {
-                let cs = csr.apply();
-                if !csr.fits_into(&builder) || !is_valid_std_address(&cs, &st.version) {
-                    finish_store_overflow(stack, csr, builder, quiet)
-                } else {
-                    SafeRc::make_mut(&mut builder).store_slice(cs)?;
-                    finish_store_ok(stack, builder, quiet)
-                }
+            Ok(0)
+        } else if value.as_cell_slice().is_some() {
+            let csr = ok!(value.into_cell_slice());
+            let cs = csr.apply();
+            if !csr.fits_into(&builder) || !is_valid_std_address(&cs, &st.version) {
+                finish_store_overflow(stack, csr, builder, quiet)
+            } else {
+                SafeRc::make_mut(&mut builder).store_slice(cs)?;
+                finish_store_ok(stack, builder, quiet)
             }
+        } else if quiet && st.version.is_ton(14..) {
+            ok!(stack.push_raw(value));
+            ok!(stack.push_raw(builder));
+            ok!(stack.push_bool(true));
+            Ok(0)
+        } else {
+            vm_bail!(InvalidType {
+                expected: StackValueType::Slice as _,
+                actual: value.raw_ty(),
+            })
         }
     }
 }
@@ -687,6 +696,15 @@ mod test {
         assert_run_vm!("STOPTSTDADDR", [raw value.clone(), raw rc_buider.clone()] => [raw filler_rc_builder.clone()]);
         assert_run_vm!("STOPTSTDADDRQ", [raw value.clone(), raw rc_buider] => [raw filler_rc_builder, int 0]);
         Ok(())
+    }
+
+    #[test]
+    #[traced_test]
+    fn store_std_opt_address_bad_type_test() {
+        let builder = CellBuilder::new();
+        let rc_buider = SafeRc::new_dyn_value(builder);
+
+        assert_run_vm!("STOPTSTDADDRQ", [int 100, raw rc_buider.clone()] => [int 100, raw rc_buider, int -1]);
     }
 
     #[test]
