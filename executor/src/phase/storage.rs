@@ -115,7 +115,7 @@ impl ExecutorState<'_> {
                     if (matches!(&self.state, AccountState::Uninit)
                         || !self.params.disable_delete_frozen_accounts)
                         && fees_due.into_inner() > config.delete_due_limit as u128
-                        && !self.balance.other.is_empty() =>
+                        && self.balance.other.is_empty() =>
                 {
                     AccountStatusChange::Deleted
                 }
