@@ -239,10 +239,7 @@ pub struct ExecutorInspector<'e> {
     /// Actions list from compute phase.
     pub actions: Option<Cell>,
     /// A set of changes of the public libraries dict.
-    ///
-    /// NOTE: The order is the same as the actions order so
-    /// it can contain duplicates and must be folded before use.
-    pub public_libs_diff: Vec<PublicLibraryChange>,
+    pub public_libs_diff: ahash::HashMap<HashBytes, PublicLibraryChange>,
     /// Compute phase exit code.
     pub exit_code: Option<i32>,
     /// Hash of the library in case it was missing during execution.
@@ -260,17 +257,7 @@ pub struct ExecutorInspector<'e> {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PublicLibraryChange {
     Add(Cell),
-    Remove(HashBytes),
-}
-
-impl PublicLibraryChange {
-    /// Returns a hash of the changed library.
-    pub fn lib_hash(&self) -> &HashBytes {
-        match self {
-            Self::Add(cell) => cell.repr_hash(),
-            Self::Remove(hash) => hash,
-        }
-    }
+    Remove,
 }
 
 /// Hook for a compute phase to modify C7 register data.

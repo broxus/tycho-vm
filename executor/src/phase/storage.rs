@@ -2,16 +2,18 @@ use anyhow::Result;
 use tycho_types::models::{AccountState, AccountStatus, AccountStatusChange, StoragePhase};
 use tycho_types::num::Tokens;
 
-use crate::ExecutorState;
 use crate::phase::receive::ReceivedMessage;
+use crate::{ExecutorInspector, ExecutorState, PublicLibraryChange};
 
 /// Storage phase input context.
-pub struct StoragePhaseContext<'a> {
+pub struct StoragePhaseContext<'a, 'e> {
     /// Whether to adjust remaining message balance
     /// if it becomes greater than the account balance.
     pub adjust_msg_balance: bool,
     /// Received message (external or internal).
     pub received_message: Option<&'a mut ReceivedMessage>,
+    /// Executor inspector.
+    pub inspector: Option<&'a mut ExecutorInspector<'e>>,
 }
 
 impl ExecutorState<'_> {
@@ -35,7 +37,7 @@ impl ExecutorState<'_> {
     /// [`bounce_enabled`]: ReceivedMessage::bounce_enabled
     /// [`last_paid`]: tycho_types::models::StorageInfo::last_paid
     /// [`total_fees`]: Self::total_fees
-    pub fn storage_phase(&mut self, ctx: StoragePhaseContext<'_>) -> Result<StoragePhase> {
+    pub fn storage_phase(&mut self, ctx: StoragePhaseContext<'_, '_>) -> Result<StoragePhase> {
         anyhow::ensure!(
             self.params.block_unixtime >= self.storage_stat.last_paid,
             "current unixtime is less than the account last_paid",
@@ -151,6 +153,22 @@ impl ExecutorState<'_> {
             }
         }
 
+        // Apply public libraries diff in case of masterchain account freeze/deletion.
+        if is_masterchain
+            && status_change != AccountStatusChange::Unchanged
+            && let AccountState::Active(state) = &self.state
+            && let Some(inspector) = ctx.inspector
+        {
+            for entry in state.libraries.values() {
+                let lib = entry?;
+                if lib.public {
+                    inspector
+                        .public_libs_diff
+                        .insert(*lib.root.repr_hash(), PublicLibraryChange::Remove);
+                }
+            }
+        }
+
         // Adjust message value.
         if ctx.adjust_msg_balance
             && let Some(msg) = ctx.received_message
@@ -229,6 +247,7 @@ mod tests {
             .storage_phase(StoragePhaseContext {
                 adjust_msg_balance: false,
                 received_message: None,
+                inspector: None,
             })
             .unwrap();
 
@@ -289,6 +308,7 @@ mod tests {
                 .storage_phase(StoragePhaseContext {
                     adjust_msg_balance: false,
                     received_message: None,
+                    inspector: None,
                 })
                 .unwrap();
 
@@ -359,6 +379,7 @@ mod tests {
             .storage_phase(StoragePhaseContext {
                 adjust_msg_balance: false,
                 received_message: None,
+                inspector: None,
             })
             .unwrap();
 
@@ -445,6 +466,7 @@ mod tests {
         let storage_phase = state.storage_phase(StoragePhaseContext {
             adjust_msg_balance: false,
             received_message: None,
+            inspector: None,
         })?;
 
         // everything should not change

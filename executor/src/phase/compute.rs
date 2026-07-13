@@ -13,7 +13,7 @@ use crate::util::{
     StateLimitsResult, check_state_limits_diff, new_varuint24_truncate, new_varuint56_truncate,
     unlikely,
 };
-use crate::{ExecutorInspector, ExecutorState};
+use crate::{ExecutorInspector, ExecutorState, PublicLibraryChange};
 
 /// The exact type of smart contract info used for C7.
 pub type ComputePhaseSmcInfo = tycho_vm::SmcInfoTonV11;
@@ -335,11 +335,13 @@ impl ExecutorState<'_> {
         let mut inspector_actions = None;
         let mut inspector_exit_code = None;
         let mut inspector_total_gas_used = None;
+        let mut inspector_public_libs_diff = None;
         let mut missing_library = None;
         if let Some(inspector) = ctx.inspector {
             inspector_actions = Some(&mut inspector.actions);
             inspector_exit_code = Some(&mut inspector.exit_code);
             inspector_total_gas_used = Some(&mut inspector.total_gas_used);
+            inspector_public_libs_diff = Some(&mut inspector.public_libs_diff);
             missing_library = Some(&mut inspector.missing_library);
             if let Some(debug) = inspector.debug.as_deref_mut() {
                 vm.debug = Some(debug);
@@ -381,6 +383,19 @@ impl ExecutorState<'_> {
         if res.accepted && msg_state_used {
             account_activated = self.orig_status != AccountStatus::Active;
             self.end_status = AccountStatus::Active;
+
+            // Apply libraries diff on account unfreeze.
+            if is_masterchain
+                && self.orig_status == AccountStatus::Frozen
+                && let Some(diff) = inspector_public_libs_diff
+            {
+                for entry in res.new_state.libraries.values() {
+                    let lib = entry?;
+                    if lib.public {
+                        diff.insert(*lib.root.repr_hash(), PublicLibraryChange::Add(lib.root));
+                    }
+                }
+            }
         }
 
         if let Some(committed) = vm.committed_state

@@ -24,6 +24,7 @@ impl ExecutorState<'_> {
             .storage_phase(StoragePhaseContext {
                 adjust_msg_balance: false,
                 received_message: None,
+                inspector: inspector.as_deref_mut(),
             })
             .context("storage phase failed")?;
 

@@ -1,3 +1,5 @@
+use std::collections::hash_map;
+
 use anyhow::Result;
 use tycho_types::cell::{CellTreeStats, Lazy};
 use tycho_types::error::Error;
@@ -158,6 +160,9 @@ impl ExecutorState<'_> {
         // Action list itself is ok.
         res.action_phase.valid = true;
 
+        // We need the original libraries list when account is deleted.
+        let original_libs = ctx.new_state.libraries.clone();
+
         // Execute actions.
         let mut action_ctx = ActionContext {
             need_bounce_on_fail: false,
@@ -171,7 +176,7 @@ impl ExecutorState<'_> {
             end_lt: self.end_lt,
             out_msgs: Vec::new(),
             delete_account: false,
-            public_libs_diff: ctx.inspector.is_some().then(Vec::new),
+            public_libs_diff: ctx.inspector.is_some().then(Default::default),
             compute_phase: ctx.compute_phase,
             action_phase: &mut res.action_phase,
         };
@@ -236,11 +241,12 @@ impl ExecutorState<'_> {
             }
         }
 
+        let is_masterchain = self.address.is_masterchain();
+
         // Check that the new state does not exceed size limits.
         // TODO: Ignore this step if account is going to be deleted anyway?
         if !self.is_special {
             let limits = &self.config.size_limits;
-            let is_masterchain = self.address.is_masterchain();
             let check = match &self.state {
                 AccountState::Active(current_state) => check_state_limits_diff(
                     current_state,
@@ -295,6 +301,20 @@ impl ExecutorState<'_> {
         action_ctx.action_phase.result_arg = None;
         action_ctx.action_phase.success = true;
 
+        enum ApplyDiff {
+            Skip,
+            FromActions,
+            Clear,
+        }
+
+        let mut apply_diff = if self.end_status == AccountStatus::Active {
+            // A still active account updates its libraries via actions.
+            ApplyDiff::FromActions
+        } else {
+            // We already decided that the account is goint to freeze.
+            ApplyDiff::Skip
+        };
+
         if action_ctx.delete_account {
             if self.params.strict_extra_currency {
                 // Require only native balance to be zero for strict EC behaviour.
@@ -304,6 +324,13 @@ impl ExecutorState<'_> {
                 debug_assert!(action_ctx.remaining_balance.is_zero());
             }
             action_ctx.action_phase.status_change = AccountStatusChange::Deleted;
+
+            // When account is deleted all its library actions are ignored and
+            // the resulting diff is a deletion of all public libraries.
+            if let ApplyDiff::FromActions = apply_diff {
+                apply_diff = ApplyDiff::Clear;
+            }
+
             self.end_status = if action_ctx.remaining_balance.is_zero() {
                 // Delete account only if its balance is completely empty
                 // (both native and extra currency balance is zero).
@@ -313,7 +340,7 @@ impl ExecutorState<'_> {
                 AccountStatus::Uninit
             };
             self.cached_storage_stat = None;
-        }
+        };
 
         if let Some(fees) = action_ctx.action_phase.total_action_fees {
             // NOTE: Forwarding fees are not collected here.
@@ -321,8 +348,53 @@ impl ExecutorState<'_> {
         }
         self.balance = action_ctx.remaining_balance;
 
-        if let Some(inspector) = ctx.inspector {
-            inspector.public_libs_diff = action_ctx.public_libs_diff.unwrap_or_default();
+        if is_masterchain
+            && let Some(inspector) = ctx.inspector
+            && let Some(diff) = action_ctx.public_libs_diff
+        {
+            match apply_diff {
+                ApplyDiff::Skip => {}
+                ApplyDiff::Clear => {
+                    for entry in original_libs.values() {
+                        let lib = entry?;
+                        if lib.public {
+                            match inspector.public_libs_diff.entry(*lib.root.repr_hash()) {
+                                hash_map::Entry::Vacant(entry) => {
+                                    entry.insert(PublicLibraryChange::Remove);
+                                }
+                                hash_map::Entry::Occupied(entry) => match entry.get() {
+                                    PublicLibraryChange::Add(_) => {
+                                        // Library was added during unfreeze, so action phase just cancels this entry.
+                                        // (no visible public libraries diff)
+                                        entry.remove();
+                                    }
+                                    // We should not bee here, but its ok to leave it like this.
+                                    PublicLibraryChange::Remove => {}
+                                },
+                            }
+                        }
+                    }
+                }
+                ApplyDiff::FromActions => {
+                    for (key, lib) in diff {
+                        let change = lib.change;
+                        match inspector.public_libs_diff.entry(key) {
+                            hash_map::Entry::Vacant(entry) => {
+                                entry.insert(change);
+                            }
+                            hash_map::Entry::Occupied(mut entry) => match (&entry.get(), &change) {
+                                // There is no visible diff when unfrozen library is removed in actions.
+                                (PublicLibraryChange::Add(_), PublicLibraryChange::Remove) => {
+                                    entry.remove();
+                                }
+                                _ => {
+                                    entry.insert(change);
+                                }
+                            },
+                        }
+                    }
+                }
+            }
         }
 
         self.out_msgs = action_ctx.out_msgs;
@@ -879,11 +951,19 @@ impl ExecutorState<'_> {
                         match (was_public, add_public) {
                             // Add new public libraries.
                             (None, true) | (Some(false), true) => {
-                                diff.push(PublicLibraryChange::Add(root))
+                                insert_temp_change(
+                                    diff,
+                                    *root.repr_hash(),
+                                    PublicLibraryChange::Add(root),
+                                );
                             }
                             // Remove public libraries
                             (Some(true), false) => {
-                                diff.push(PublicLibraryChange::Remove(*root.repr_hash()));
+                                insert_temp_change(
+                                    diff,
+                                    *root.repr_hash(),
+                                    PublicLibraryChange::Remove,
+                                );
                             }
                             // Ignore unchanged or private libraries.
                             _ => {}
@@ -902,7 +982,7 @@ impl ExecutorState<'_> {
                 // Track removed public libs by an inspector for masterchain accounts.
                 Ok(Some(lib)) if is_masterchain && lib.public => {
                     if let Some(diff) = &mut ctx.public_libs_diff {
-                        diff.push(PublicLibraryChange::Remove(*hash));
+                        insert_temp_change(diff, *hash, PublicLibraryChange::Remove);
                     }
                 }
                 Ok(_) => {}
@@ -921,6 +1001,43 @@ impl ExecutorState<'_> {
     }
 }
 
+fn insert_temp_change(
+    diff: &mut ahash::HashMap<HashBytes, LocalLibraryChange>,
+    key: HashBytes,
+    change: PublicLibraryChange,
+) {
+    match diff.entry(key) {
+        hash_map::Entry::Vacant(entry) => {
+            entry.insert(LocalLibraryChange {
+                // Remember whether the first library was from actions.
+                is_new: matches!(&change, PublicLibraryChange::Add(_)),
+                change,
+            });
+        }
+        hash_map::Entry::Occupied(mut entry) => {
+            let value = entry.get_mut();
+            match (&value.change, &change) {
+                // Temp entry cancels itself.
+                (PublicLibraryChange::Add(_), PublicLibraryChange::Remove) if value.is_new => {
+                    entry.remove();
+                }
+                // Temp remove cancels itself.
+                (PublicLibraryChange::Remove, PublicLibraryChange::Add(_)) if !value.is_new => {
+                    entry.remove();
+                }
+                _ => {
+                    value.change = change;
+                }
+            }
+        }
+    }
+}
+
+struct LocalLibraryChange {
+    is_new: bool,
+    change: PublicLibraryChange,
+}
+
 struct ActionContext<'a> {
     need_bounce_on_fail: bool,
     strict_extra_currency: bool,
@@ -933,7 +1050,7 @@ struct ActionContext<'a> {
     end_lt: u64,
     out_msgs: Vec<Lazy<OwnedMessage>>,
     delete_account: bool,
-    public_libs_diff: Option<Vec<PublicLibraryChange>>,
+    public_libs_diff: Option<ahash::HashMap<HashBytes, LocalLibraryChange>>,
 
     compute_phase: &'a ExecutedComputePhase,
     action_phase: &'a mut ActionPhase,
@@ -2797,7 +2914,7 @@ mod tests {
             libraries: Dict<HashBytes, SimpleLib>,
             target: Dict<HashBytes, SimpleLib>,
             changes: Vec<(ChangeLibraryMode, LibRef)>,
-            diff: Vec<PublicLibraryChange>,
+            diff: ahash::HashMap<HashBytes, PublicLibraryChange>,
         }
 
         fn make_lib(id: u32) -> Cell {
@@ -2823,6 +2940,28 @@ mod tests {
             Dict::try_from_sorted_slice(&items).unwrap()
         }
 
+        enum Change {
+            Add(Cell),
+            Remove(HashBytes),
+        }
+
+        fn make_diff(
+            items: impl IntoIterator<Item = Change>,
+        ) -> ahash::HashMap<HashBytes, PublicLibraryChange> {
+            let mut result = ahash::HashMap::<_, _>::default();
+            for item in items {
+                match item {
+                    Change::Add(cell) => {
+                        result.insert(*cell.repr_hash(), PublicLibraryChange::Add(cell));
+                    }
+                    Change::Remove(hash_bytes) => {
+                        result.insert(hash_bytes, PublicLibraryChange::Remove);
+                    }
+                }
+            }
+            result
+        }
+
         let params = make_default_params();
         let config = make_default_config();
 
@@ -2832,14 +2971,14 @@ mod tests {
                 libraries: Dict::new(),
                 target: Dict::new(),
                 changes: Vec::new(),
-                diff: Vec::new(),
+                diff: make_diff([]),
             },
             // Add private libs.
             TestCase {
                 libraries: Dict::new(),
                 target: make_libs([(123, false)]),
                 changes: vec![(ChangeLibraryMode::ADD_PRIVATE, LibRef::Cell(make_lib(123)))],
-                diff: Vec::new(),
+                diff: make_diff([]),
             },
             TestCase {
                 libraries: Dict::new(),
@@ -2848,13 +2987,13 @@ mod tests {
                     (ChangeLibraryMode::ADD_PRIVATE, LibRef::Cell(make_lib(123))),
                     (ChangeLibraryMode::ADD_PRIVATE, LibRef::Cell(make_lib(234))),
                 ],
-                diff: Vec::new(),
+                diff: make_diff([]),
             },
             TestCase {
                 libraries: make_libs([(123, false)]),
                 target: make_libs([(123, false)]),
                 changes: vec![(ChangeLibraryMode::ADD_PRIVATE, LibRef::Cell(make_lib(123)))],
-                diff: Vec::new(),
+                diff: make_diff([]),
             },
             TestCase {
                 libraries: make_libs([(123, false)]),
@@ -2863,14 +3002,14 @@ mod tests {
                     ChangeLibraryMode::ADD_PRIVATE,
                     LibRef::Hash(make_lib_hash(123)),
                 )],
-                diff: Vec::new(),
+                diff: make_diff([]),
             },
             // Add public libs.
             TestCase {
                 libraries: Dict::new(),
                 target: make_libs([(123, true)]),
                 changes: vec![(ChangeLibraryMode::ADD_PUBLIC, LibRef::Cell(make_lib(123)))],
-                diff: vec![PublicLibraryChange::Add(make_lib(123))],
+                diff: make_diff([Change::Add(make_lib(123))]),
             },
             TestCase {
                 libraries: Dict::new(),
@@ -2879,16 +3018,13 @@ mod tests {
                     (ChangeLibraryMode::ADD_PUBLIC, LibRef::Cell(make_lib(123))),
                     (ChangeLibraryMode::ADD_PUBLIC, LibRef::Cell(make_lib(234))),
                 ],
-                diff: vec![
-                    PublicLibraryChange::Add(make_lib(123)),
-                    PublicLibraryChange::Add(make_lib(234)),
-                ],
+                diff: make_diff([Change::Add(make_lib(123)), Change::Add(make_lib(234))]),
             },
             TestCase {
                 libraries: make_libs([(123, true)]),
                 target: make_libs([(123, true)]),
                 changes: vec![(ChangeLibraryMode::ADD_PUBLIC, LibRef::Cell(make_lib(123)))],
-                diff: Vec::new(),
+                diff: make_diff([]),
             },
             TestCase {
                 libraries: make_libs([(123, true)]),
@@ -2897,7 +3033,7 @@ mod tests {
                     ChangeLibraryMode::ADD_PUBLIC,
                     LibRef::Hash(make_lib_hash(123)),
                 )],
-                diff: Vec::new(),
+                diff: make_diff([]),
             },
             // Remove public libs.
             TestCase {
@@ -2905,39 +3041,39 @@ mod tests {
                 target: Dict::new(),
                 // Non-existing by cell.
                 changes: vec![(ChangeLibraryMode::REMOVE, LibRef::Cell(make_lib(123)))],
-                diff: Vec::new(),
+                diff: make_diff([]),
             },
             TestCase {
                 libraries: Dict::new(),
                 target: Dict::new(),
                 // Non-existing by hash.
                 changes: vec![(ChangeLibraryMode::REMOVE, LibRef::Hash(make_lib_hash(123)))],
-                diff: Vec::new(),
+                diff: make_diff([]),
             },
             TestCase {
                 libraries: make_libs([(123, false)]),
                 target: Dict::new(),
                 changes: vec![(ChangeLibraryMode::REMOVE, LibRef::Cell(make_lib(123)))],
-                diff: Vec::new(),
+                diff: make_diff([]),
             },
             TestCase {
                 libraries: make_libs([(123, false)]),
                 target: Dict::new(),
                 changes: vec![(ChangeLibraryMode::REMOVE, LibRef::Hash(make_lib_hash(123)))],
-                diff: Vec::new(),
+                diff: make_diff([]),
             },
             TestCase {
                 libraries: make_libs([(123, true)]),
                 target: Dict::new(),
                 changes: vec![(ChangeLibraryMode::REMOVE, LibRef::Cell(make_lib(123)))],
-                diff: vec![PublicLibraryChange::Remove(make_lib_hash(123))],
+                diff: make_diff([Change::Remove(make_lib_hash(123))]),
             },
             // Update public libs.
             TestCase {
                 libraries: make_libs([(123, false)]),
                 target: make_libs([(123, true)]),
                 changes: vec![(ChangeLibraryMode::ADD_PUBLIC, LibRef::Cell(make_lib(123)))],
-                diff: vec![PublicLibraryChange::Add(make_lib(123))],
+                diff: make_diff([Change::Add(make_lib(123))]),
             },
             TestCase {
                 libraries: make_libs([(123, false)]),
@@ -2946,13 +3082,13 @@ mod tests {
                     ChangeLibraryMode::ADD_PUBLIC,
                     LibRef::Hash(make_lib_hash(123)),
                 )],
-                diff: vec![PublicLibraryChange::Add(make_lib(123))],
+                diff: make_diff([Change::Add(make_lib(123))]),
             },
             TestCase {
                 libraries: make_libs([(123, true)]),
                 target: make_libs([(123, false)]),
                 changes: vec![(ChangeLibraryMode::ADD_PRIVATE, LibRef::Cell(make_lib(123)))],
-                diff: vec![PublicLibraryChange::Remove(make_lib_hash(123))],
+                diff: make_diff([Change::Remove(make_lib_hash(123))]),
             },
             TestCase {
                 libraries: make_libs([(123, true)]),
@@ -2961,7 +3097,7 @@ mod tests {
                     ChangeLibraryMode::ADD_PRIVATE,
                     LibRef::Hash(make_lib_hash(123)),
                 )],
-                diff: vec![PublicLibraryChange::Remove(make_lib_hash(123))],
+                diff: make_diff([Change::Remove(make_lib_hash(123))]),
             },
         ];
 

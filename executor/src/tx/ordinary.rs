@@ -42,6 +42,7 @@ impl ExecutorState<'_> {
                 .storage_phase(StoragePhaseContext {
                     adjust_msg_balance: false,
                     received_message: Some(&mut msg),
+                    inspector: inspector.as_deref_mut(),
                 })
                 .context("storage phase failed")?;
 
@@ -64,6 +65,7 @@ impl ExecutorState<'_> {
                 .storage_phase(StoragePhaseContext {
                     adjust_msg_balance: true,
                     received_message: Some(&mut msg),
+                    inspector: inspector.as_deref_mut(),
                 })
                 .context("storage phase failed")?;
         }
@@ -183,7 +185,7 @@ impl ExecutorState<'_> {
     pub fn check_ordinary_transaction(
         &mut self,
         msg_root: Cell,
-        inspector: Option<&mut ExecutorInspector<'_>>,
+        mut inspector: Option<&mut ExecutorInspector<'_>>,
     ) -> TxResult<()> {
         // Receive phase
         let mut msg = match self.receive_in_msg(msg_root) {
@@ -196,6 +198,7 @@ impl ExecutorState<'_> {
             .storage_phase(StoragePhaseContext {
                 adjust_msg_balance: false,
                 received_message: Some(&mut msg),
+                inspector: inspector.as_deref_mut(),
             })
             .context("storage phase failed")?;
 
