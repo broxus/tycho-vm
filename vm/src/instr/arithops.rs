@@ -3,6 +3,7 @@ use std::cmp::Ordering;
 use num_bigint::{BigInt, Sign};
 use num_integer::Integer;
 use num_traits::Zero;
+use tycho_types::prelude::BigIntExt;
 #[cfg(feature = "dump")]
 use tycho_types::prelude::*;
 use tycho_vm_proc::vm_module;
@@ -50,6 +51,7 @@ impl ArithOps {
 
         vm_log_op!("PUSHINT {int}");
 
+        vm_ensure!(int.bitsize(true) <= 257, IntegerOverflow);
         ok!(SafeRc::make_mut(&mut st.stack).push_int(int));
         Ok(0)
     }
@@ -974,8 +976,10 @@ fn update_or_new_rc(mut rc: SafeRc<BigInt>, value: BigInt) -> SafeRc<BigInt> {
 #[cfg(test)]
 mod tests {
     use tracing_test::traced_test;
+    use tycho_types::prelude::*;
 
     use super::*;
+    use crate::StackValue;
 
     #[test]
     #[traced_test]
@@ -995,6 +999,24 @@ mod tests {
         assert_run_vm!("PUSHNEGPOW2 1", [] => [int -2]);
         assert_run_vm!("PUSHNEGPOW2 10", [] => [int (-1 << 10)]);
         assert_run_vm!("PUSHNEGPOW2 255", [] => [int (BigInt::from(-1) << 255)]);
+    }
+
+    #[test]
+    #[traced_test]
+    fn op_pushint_big() {
+        let value = BigInt::from(1u8) << 257;
+
+        let mut code = CellBuilder::new();
+        code.store_uint(0x105e, 13).unwrap();
+        code.store_bigint(&value, 259, true).unwrap();
+        let code = code.build().unwrap();
+
+        let mut vm = VmState::builder().with_code(code).build();
+        assert_eq!(!vm.run(), 4);
+
+        let received = format!("{}", (&vm.stack.items as &dyn StackValue).display_list());
+        let expected = format!("{}", (&tuple![int 0] as &dyn StackValue).display_list());
+        assert_eq!(received, expected);
     }
 
     #[test]

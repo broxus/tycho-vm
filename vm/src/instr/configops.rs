@@ -223,7 +223,7 @@ impl ConfigOps {
             *t /= (1u32 << 16) - config.first_frac as u32;
         }
 
-        ok!(stack.push_raw(fwd_fee));
+        ok!(stack.push_raw_int(fwd_fee, false));
         Ok(0)
     }
 
