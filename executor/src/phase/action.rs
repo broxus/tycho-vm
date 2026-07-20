@@ -3035,6 +3035,27 @@ mod tests {
                 )],
                 diff: make_diff([]),
             },
+            // Cancel public library changes in the same action phase.
+            TestCase {
+                libraries: Dict::new(),
+                target: make_libs([(234, true)]),
+                changes: vec![
+                    (ChangeLibraryMode::ADD_PUBLIC, LibRef::Cell(make_lib(234))),
+                    (ChangeLibraryMode::ADD_PUBLIC, LibRef::Cell(make_lib(123))),
+                    (ChangeLibraryMode::REMOVE, LibRef::Hash(make_lib_hash(123))),
+                ],
+                diff: make_diff([Change::Add(make_lib(234))]),
+            },
+            TestCase {
+                libraries: make_libs([(123, true)]),
+                target: make_libs([(123, true), (234, true)]),
+                changes: vec![
+                    (ChangeLibraryMode::ADD_PUBLIC, LibRef::Cell(make_lib(234))),
+                    (ChangeLibraryMode::REMOVE, LibRef::Hash(make_lib_hash(123))),
+                    (ChangeLibraryMode::ADD_PUBLIC, LibRef::Cell(make_lib(123))),
+                ],
+                diff: make_diff([Change::Add(make_lib(234))]),
+            },
             // Remove public libs.
             TestCase {
                 libraries: Dict::new(),

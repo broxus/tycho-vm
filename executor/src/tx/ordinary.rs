@@ -227,17 +227,62 @@ mod tests {
     use tycho_asm_macros::tvmasm;
     use tycho_types::cell::Lazy;
     use tycho_types::models::{
-        Account, AccountState, AccountStatusChange, CurrencyCollection, ExtInMsgInfo, IntMsgInfo,
-        MsgInfo, OptionalAccount, ShardAccount, StateInit, StdAddr, StorageInfo, StorageUsed,
-        TxInfo,
+        Account, AccountState, AccountStatusChange, ComputePhaseSkipReason, CurrencyCollection,
+        ExtInMsgInfo, IntMsgInfo, MsgInfo, OptionalAccount, ShardAccount, SimpleLib, StateInit,
+        StdAddr, StorageInfo, StorageUsed, TxInfo,
     };
     use tycho_types::num::VarUint56;
 
     use super::*;
-    use crate::Executor;
     use crate::tests::{make_default_config, make_default_params, make_message};
+    use crate::{Executor, PublicLibraryChange};
 
     const STUB_ADDR: StdAddr = StdAddr::new(0, HashBytes::ZERO);
+    const MASTERCHAIN_ADDR: StdAddr = StdAddr::new(-1, HashBytes::ZERO);
+
+    fn make_library(id: u16) -> Cell {
+        CellBuilder::build_from(id).unwrap()
+    }
+
+    fn make_libraries<I>(items: I) -> Dict<HashBytes, SimpleLib>
+    where
+        I: IntoIterator<Item = (u16, bool)>,
+    {
+        let mut items = items
+            .into_iter()
+            .map(|(id, public)| {
+                let root = make_library(id);
+                (*root.repr_hash(), SimpleLib { root, public })
+            })
+            .collect::<Vec<_>>();
+        items.sort_unstable_by_key(|(hash, _)| *hash);
+        Dict::try_from_sorted_slice(&items).unwrap()
+    }
+
+    fn set_libraries(state: &mut ExecutorState<'_>, libraries: Dict<HashBytes, SimpleLib>) {
+        let AccountState::Active(state) = &mut state.state else {
+            panic!("expected active account state");
+        };
+        state.libraries = libraries;
+    }
+
+    fn assert_public_libs_diff(
+        actual: &ahash::HashMap<HashBytes, PublicLibraryChange>,
+        added: &[Cell],
+        removed: &[Cell],
+    ) {
+        let expected = added
+            .iter()
+            .cloned()
+            .map(|cell| (*cell.repr_hash(), PublicLibraryChange::Add(cell)))
+            .chain(
+                removed
+                    .iter()
+                    .map(|cell| (*cell.repr_hash(), PublicLibraryChange::Remove)),
+            )
+            .collect::<ahash::HashMap<_, _>>();
+        assert_eq!(actual, &expected);
+    }
 
     pub fn make_uninit_with_balance<T: Into<CurrencyCollection>>(
         address: &StdAddr,
@@ -410,6 +455,316 @@ mod tests {
                 ..Default::default()
             })
         );
+
+        Ok(())
+    }
+
+    #[test]
+    fn deleted_account_removes_public_libs() -> Result<()> {
+        let params = make_default_params();
+        let config = make_default_config();
+
+        let code = tvmasm!(
+            r#"
+            ACCEPT
+            // This library only exists during the action phase and must not appear in the diff.
+            PUSHREF x{4444}
+            INT 2 SETLIBCODE
+            NEWC
+            // int_msg_info$0 ihr_disabled:Bool bounce:Bool bounced:Bool src:MsgAddress -> 011000
+            INT 0b011000 STUR 6
+            MYADDR
+            STSLICER
+            INT 0 STGRAMS
+            // extra:$0 ihr_fee:Tokens fwd_fee:Tokens created_lt:uint64 created_at:uint32
+            // 1       + 4            + 4            + 64              + 32
+            // init:none$0 body:left$0
+            // 1          + 1
+            INT 107 STZEROES
+            ENDC INT 160 SENDRAWMSG
+            "#
+        );
+        let public_lib_1 = make_library(0x1111);
+        let public_lib_2 = make_library(0x2222);
+        let private_lib = make_library(0x3333);
+
+        let mut state = ExecutorState::new_active(
+            &params,
+            &config,
+            &MASTERCHAIN_ADDR,
+            Tokens::new(1_000_000_000),
+            Cell::empty_cell(),
+            code,
+        );
+        set_libraries(
+            &mut state,
+            make_libraries([(0x1111, true), (0x2222, true), (0x3333, false)]),
+        );
+
+        let mut inspector = ExecutorInspector::default();
+        let info = state.run_ordinary_transaction(
+            false,
+            make_message(
+                IntMsgInfo {
+                    src: MASTERCHAIN_ADDR.into(),
+                    dst: MASTERCHAIN_ADDR.into(),
+                    value: CurrencyCollection::new(1_000_000_000),
+                    ..Default::default()
+                },
+                None,
+                None,
+            ),
+            Some(&mut inspector),
+        )?;
+
+        assert!(info.destroyed);
+        assert_eq!(state.end_status, AccountStatus::NotExists);
+        assert_eq!(
+            info.action_phase.unwrap().status_change,
+            AccountStatusChange::Deleted
+        );
+        assert_public_libs_diff(&inspector.public_libs_diff, &[], &[
+            public_lib_1,
+            public_lib_2,
+        ]);
+        assert!(
+            !inspector
+                .public_libs_diff
+                .contains_key(private_lib.repr_hash())
+        );
+        assert!(
+            !inspector
+                .public_libs_diff
+                .contains_key(make_library(0x4444).repr_hash())
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn frozen_account_removes_public_libs() -> Result<()> {
+        let params = make_default_params();
+        let config = make_default_config();
+        let public_lib_1 = make_library(0x1111);
+        let public_lib_2 = make_library(0x2222);
+        let private_lib = make_library(0x3333);
+
+        let mut state = ExecutorState::new_active(
+            &params,
+            &config,
+            &MASTERCHAIN_ADDR,
+            Tokens::ZERO,
+            Cell::empty_cell(),
+            tvmasm!("ACCEPT"),
+        );
+        set_libraries(
+            &mut state,
+            make_libraries([(0x1111, true), (0x2222, true), (0x3333, false)]),
+        );
+        state.storage_stat = StorageInfo {
+            used: StorageUsed {
+                bits: VarUint56::new(128),
+                cells: VarUint56::new(1),
+            },
+            storage_extra: Default::default(),
+            last_paid: params.block_unixtime - 1000,
+            due_payment: Some(Tokens::new(
+                2 * config.mc_gas_prices.freeze_due_limit as u128,
+            )),
+        };
+
+        let mut inspector = ExecutorInspector::default();
+        let info = state.run_ordinary_transaction(
+            false,
+            make_message(
+                IntMsgInfo {
+                    src: MASTERCHAIN_ADDR.into(),
+                    dst: MASTERCHAIN_ADDR.into(),
+                    value: CurrencyCollection::new(1_000_000_000),
+                    bounce: true,
+                    ..Default::default()
+                },
+                None,
+                None,
+            ),
+            Some(&mut inspector),
+        )?;
+
+        assert_eq!(
+            info.storage_phase.unwrap().status_change,
+            AccountStatusChange::Frozen
+        );
+        assert_eq!(state.end_status, AccountStatus::Frozen);
+        assert_public_libs_diff(&inspector.public_libs_diff, &[], &[
+            public_lib_1,
+            public_lib_2,
+        ]);
+        assert!(
+            !inspector
+                .public_libs_diff
+                .contains_key(private_lib.repr_hash())
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn unfrozen_account_adds_public_libs() -> Result<()> {
+        let params = make_default_params();
+        let config = make_default_config();
+        let public_lib_1 = make_library(0x1111);
+        let public_lib_2 = make_library(0x2222);
+        let private_lib = make_library(0x3333);
+        let state_init = StateInit {
+            code: Some(Boc::decode(tvmasm!("ACCEPT"))?),
+            libraries: make_libraries([(0x1111, true), (0x2222, true), (0x3333, false)]),
+            ..Default::default()
+        };
+        let state_init_hash = *CellBuilder::build_from(&state_init)?.repr_hash();
+        let mut state = ExecutorState::new_frozen(
+            &params,
+            &config,
+            &MASTERCHAIN_ADDR,
+            Tokens::ZERO,
+            state_init_hash,
+        );
+
+        let mut inspector = ExecutorInspector::default();
+        let info = state.run_ordinary_transaction(
+            false,
+            make_message(
+                IntMsgInfo {
+                    src: MASTERCHAIN_ADDR.into(),
+                    dst: MASTERCHAIN_ADDR.into(),
+                    value: CurrencyCollection::new(1_000_000_000),
+                    ..Default::default()
+                },
+                Some(state_init),
+                None,
+            ),
+            Some(&mut inspector),
+        )?;
+
+        let ComputePhase::Executed(compute_phase) = info.compute_phase else {
+            panic!("expected an executed compute phase");
+        };
+        assert!(compute_phase.success);
+        assert!(compute_phase.account_activated);
+        assert_eq!(state.end_status, AccountStatus::Active);
+        assert_public_libs_diff(
+            &inspector.public_libs_diff,
+            &[public_lib_1, public_lib_2],
+            &[],
+        );
+        assert!(
+            !inspector
+                .public_libs_diff
+                .contains_key(private_lib.repr_hash())
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn unfrozen_account_adds_public_libs_with_actions() -> Result<()> {
+        let params = make_default_params();
+        let config = make_default_config();
+        let removed_lib = make_library(0x1111);
+        let retained_lib = make_library(0x2222);
+        let added_lib = make_library(0x4444);
+        let state_init = StateInit {
+            code: Some(Boc::decode(tvmasm!(
+                r#"
+                ACCEPT
+                PUSHREF x{1111}
+                INT 0 SETLIBCODE
+                PUSHREF x{4444}
+                INT 2 SETLIBCODE
+                "#
+            ))?),
+            libraries: make_libraries([(0x1111, true), (0x2222, true), (0x3333, false)]),
+            ..Default::default()
+        };
+        let state_init_hash = *CellBuilder::build_from(&state_init)?.repr_hash();
+        let mut state = ExecutorState::new_frozen(
+            &params,
+            &config,
+            &MASTERCHAIN_ADDR,
+            Tokens::ZERO,
+            state_init_hash,
+        );
+
+        let mut inspector = ExecutorInspector::default();
+        let info = state.run_ordinary_transaction(
+            false,
+            make_message(
+                IntMsgInfo {
+                    src: MASTERCHAIN_ADDR.into(),
+                    dst: MASTERCHAIN_ADDR.into(),
+                    value: CurrencyCollection::new(1_000_000_000),
+                    ..Default::default()
+                },
+                Some(state_init),
+                None,
+            ),
+            Some(&mut inspector),
+        )?;
+
+        let action_phase = info.action_phase.unwrap();
+        assert!(action_phase.success);
+        assert_eq!(action_phase.special_actions, 2);
+        let AccountState::Active(final_state) = &state.state else {
+            panic!("expected active account state");
+        };
+        assert_eq!(
+            final_state.libraries,
+            make_libraries([(0x2222, true), (0x3333, false), (0x4444, true),])
+        );
+        assert_public_libs_diff(&inspector.public_libs_diff, &[retained_lib, added_lib], &[]);
+        assert!(
+            !inspector
+                .public_libs_diff
+                .contains_key(removed_lib.repr_hash())
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn deploy_with_libraries_fails() -> Result<()> {
+        let params = make_default_params();
+        let config = make_default_config();
+        let state_init = StateInit {
+            code: Some(Boc::decode(tvmasm!("ACCEPT"))?),
+            libraries: make_libraries([(0x1111, true)]),
+            ..Default::default()
+        };
+        let address = StdAddr::new(-1, *CellBuilder::build_from(&state_init)?.repr_hash());
+        let mut state = ExecutorState::new_uninit(&params, &config, &address, Tokens::ZERO);
+
+        let mut inspector = ExecutorInspector::default();
+        let info = state.run_ordinary_transaction(
+            false,
+            make_message(
+                IntMsgInfo {
+                    src: address.clone().into(),
+                    dst: address.clone().into(),
+                    value: CurrencyCollection::new(1_000_000_000),
+                    ..Default::default()
+                },
+                Some(state_init),
+                None,
+            ),
+            Some(&mut inspector),
+        )?;
+
+        let ComputePhase::Skipped(compute_phase) = info.compute_phase else {
+            panic!("expected a skipped compute phase");
+        };
+        assert_eq!(compute_phase.reason, ComputePhaseSkipReason::BadState);
+        assert_eq!(state.state, AccountState::Uninit);
+        assert_eq!(state.end_status, AccountStatus::Uninit);
+        assert!(inspector.public_libs_diff.is_empty());
 
         Ok(())
     }
